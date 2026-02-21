@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "hexshare"
+version = "0.1.0"
+description = ""
+authors = ["Merrick1307 <holuworley.yz@gmail.com>"]
+readme = ""
+
+[tool.poetry.dependencies]
+python = "^3.14"
+fastapi = "^0.129.0"
+fastapi-mail = "^1.6.2"
+pyjwt = "^2.11.0"
+asyncpg = "^0.31.0"
+python-multipart = "^0.0.22"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

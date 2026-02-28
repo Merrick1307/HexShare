@@ -10,12 +10,10 @@ these should be replaced with production‑ready implementations (e.g.
 S3 storage, Redis Streams event bus).
 """
 
-from .memory_storage import MemoryStorage
 from .jwt_token import JWTTokenAdapter
 from .noop_event_bus import NoopEventBus
 
 __all__ = [
-    "MemoryStorage",
     "JWTTokenAdapter",
     "NoopEventBus",
 ]

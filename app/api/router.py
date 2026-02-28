@@ -4,19 +4,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.dependencies.services import (get_document_service, get_link_service,
+                                           get_analytics_service, get_tenant_auth, get_share_auth)
 from app.domain import Document, ShareLink
 from app.services import DocumentService, LinkService, AnalyticsService
-from app.auth import TenantAuthDependency, ShareTokenDependency, TenantPrincipal, ShareTokenClaims
+from app.auth import TenantPrincipal, ShareTokenClaims
 
 
-def api_router(
-    *,
-    document_service: DocumentService,
-    link_service: LinkService,
-    analytics_service: AnalyticsService,
-    tenant_auth: TenantAuthDependency,
-    share_auth: ShareTokenDependency,
-) -> APIRouter:
+def api_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/documents", response_model=Document)
@@ -25,7 +20,8 @@ def api_router(
         mime_type: str = Query(..., description="MIME type"),
         size: int = Query(..., description="Size in bytes"),
         storage_key: str = Query(..., description="Key in object storage"),
-        principal: TenantPrincipal = Depends(tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth),
+        document_service: DocumentService = Depends(get_document_service),
     ) -> Document:
         return await document_service.create_document(
             tenant_id=principal.tenant_id,
@@ -37,14 +33,18 @@ def api_router(
         )
 
     @router.get("/documents", response_model=list[Document])
-    async def list_documents(principal: TenantPrincipal = Depends(tenant_auth)) -> list[Document]:
+    async def list_documents(
+            principal: TenantPrincipal = Depends(get_tenant_auth),
+            document_service: DocumentService = Depends(get_document_service)
+    ) -> list[Document]:
         docs = await document_service.list_documents(tenant_id=principal.tenant_id)
         return list(docs)
 
     @router.get("/documents/{document_id}", response_model=Document)
     async def get_document(
         document_id: str,
-        principal: TenantPrincipal = Depends(tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth),
+        document_service: DocumentService = Depends(get_document_service),
     ) -> Document:
         doc = await document_service.get_document(
             tenant_id=principal.tenant_id, document_id=document_id
@@ -61,7 +61,9 @@ def api_router(
         can_print: bool = Query(False),
         require_email: bool = Query(False),
         allowed_emails: Optional[list[str]] = Query(None),
-        principal: TenantPrincipal = Depends(tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth),
+        document_service: DocumentService = Depends(get_document_service),
+        link_service: LinkService = Depends(get_link_service),
     ) -> ShareLink:
         if not await document_service.get_document(
             tenant_id=principal.tenant_id, document_id=document_id
@@ -82,7 +84,8 @@ def api_router(
     @router.post("/links/{link_id}/revoke")
     async def revoke_link(
         link_id: str,
-        principal: TenantPrincipal = Depends(tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth),
+        link_service: LinkService = Depends(get_link_service),
     ) -> None:
         await link_service.revoke_share_link(
             tenant_id=principal.tenant_id, link_id=link_id, revoked_by=principal.user_id
@@ -92,7 +95,8 @@ def api_router(
     @router.get("/documents/{document_id}/analytics")
     async def document_analytics(
         document_id: str,
-        principal: TenantPrincipal = Depends(tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth),
+        analytics_service: AnalyticsService = Depends(get_analytics_service),
     ) -> dict:
         metrics = await analytics_service.get_document_metrics(
             tenant_id=principal.tenant_id, document_id=document_id
@@ -100,7 +104,7 @@ def api_router(
         return metrics
 
     @router.get("/view/{token}")
-    async def view_document(token: str, claims: ShareTokenClaims = Depends(share_auth)) -> dict:
+    async def view_document(claims: ShareTokenClaims = Depends(get_share_auth)) -> dict:
         """Example endpoint demonstrating share token usage.
 
         In a real application this would return an HTML/JS viewer that

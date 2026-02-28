@@ -11,7 +11,7 @@ placeholders and should be adapted to your schema.
 Example usage::
 
     import asyncpg
-    from hexshare.adapters.postgres_storage import PostgresStorage
+    from app.adapters.persistence.postgres_storage import PostgresStorage
 
     pool = await asyncpg.create_pool(dsn="postgresql://user:pass@localhost/db")
     storage = PostgresStorage(pool)

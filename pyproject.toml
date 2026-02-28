@@ -12,6 +12,7 @@ fastapi-mail = "^1.6.2"
 pyjwt = "^2.11.0"
 asyncpg = "^0.31.0"
 python-multipart = "^0.0.22"
+httpx = {extras = ["standard"], version = "^0.28.1"}
 
 
 [build-system]

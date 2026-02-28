@@ -21,24 +21,69 @@ served using Uvicorn on the default host and port.
 """
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
+
+import asyncpg
 from fastapi import FastAPI
 
+from app.adapters import NoopEventBus, JWTTokenAdapter
+from app.adapters.authz.claims import ClaimsAuthorizer
 from app.api.router import api_router
 from app.auth.tenant_auth import TenantAuthDependency
 from app.auth.share_token_auth import ShareTokenDependency
-from app.ports.storage_port import StoragePort
-from app.ports.token_port import TokenPort
-from app.ports import EventBusPort
+from app.infra.factories import StorageFactory, AccessControlFactory, PolicyEvaluatorRegistry, AuthenticatorFactory
 from app.services import DocumentService
 from app.services import LinkService
 from app.services import AnalyticsService
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    dp_pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
+
+    evaluator_name = os.getenv("HEXSHARE_POLICY_EVAL", "hexiam_bitmask")
+    preferred_storage = os.getenv("HEXSHARE_STORAGE", "postgres")
+    preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
+    preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
+
+    evaluator = PolicyEvaluatorRegistry.create(evaluator_name)
+    authorizer = ClaimsAuthorizer(evaluator=evaluator)
+    authenticator = AuthenticatorFactory.create(preferred_authenticator)
+
+    persistence_layer = StorageFactory.create(preferred_storage, pool=dp_pool)
+
+    access_control = AccessControlFactory.create(
+        preferred_access_control,
+        authorizer=authorizer,
+        authenticator=authenticator,
+        iam_url=os.getenv("HEXIAM_URL", "http://localhost:8000"),
+        client_id=os.getenv("HEXSHARE_PDP_CLIENT_ID", ""),
+        client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", ""),
+    )
+
+    token_adapter = JWTTokenAdapter()
+    event_bus = NoopEventBus()
+
+    app.state.pool = dp_pool
+    app.state.storage = persistence_layer
+    app.state.token_adapter = token_adapter
+    app.state.event_bus = event_bus
+    app.state.document_service = DocumentService(persistence_layer, event_bus)
+    app.state.link_service = LinkService(persistence_layer, token_adapter, event_bus)
+    app.state.analytics_service = AnalyticsService(persistence_layer)
+    app.state.access_control = access_control
+    app.state.tenant_auth = TenantAuthDependency(authenticator=app.state.access_control)
+    app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
+
+    yield
+
+    await dp_pool.close()
+
+
 def create_app(
-    *,
-    storage: StoragePort | None = None,
-    token_port: TokenPort | None = None,
-    event_bus: EventBusPort | None = None,
+    *args,
+    **kwargs
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -67,33 +112,11 @@ def create_app(
     FastAPI
         A configured application ready to run.
     """
-    app = FastAPI(title="HexShare", version="0.1.0")
-
-    # Dependency injection for ports.  If none provided, defaults
-    # instantiate simple in‑memory versions.  The event bus defaults
-    # to a no‑op stub.
-    from app.adapters import MemoryStorage
-    from app.adapters import JWTTokenAdapter
-    from app.adapters import NoopEventBus
-
-    storage_impl = storage or MemoryStorage()
-    token_impl = token_port or JWTTokenAdapter()
-    event_bus_impl = event_bus or NoopEventBus()
-
-    # Instantiate domain services
-    document_service = DocumentService(storage_impl, event_bus_impl)
-    link_service = LinkService(storage_impl, token_impl, event_bus_impl)
-    analytics_service = AnalyticsService(storage_impl)
+    app = FastAPI(title="HexShare", version="0.1.0", lifespan=lifespan)
 
     # Inject dependencies into the API router
     app.include_router(
-        api_router(
-            document_service=document_service,
-            link_service=link_service,
-            analytics_service=analytics_service,
-            tenant_auth=TenantAuthDependency(token_impl),
-            share_auth=ShareTokenDependency(token_impl),
-        ),
+        api_router(),
         prefix="/api/v1",
     )
 

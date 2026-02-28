@@ -3,10 +3,7 @@ Application entry point for HexShare.
 
 This module exposes a ``create_app`` function that returns a configured
 FastAPI application.  It wires together the API routers, dependency
-injection, and middleware necessary to run HexShare.  The function
-accepts optional parameters to inject custom implementations of ports or
-override settings at runtime, which makes it easier to test and to
-adapt for different deployment environments.
+injection, and middleware necessary to run HexShare.
 
 Usage example::
 
@@ -73,7 +70,7 @@ async def lifespan(app: FastAPI):
     app.state.link_service = LinkService(persistence_layer, token_adapter, event_bus)
     app.state.analytics_service = AnalyticsService(persistence_layer)
     app.state.access_control = access_control
-    app.state.tenant_auth = TenantAuthDependency(authenticator=app.state.access_control)
+    app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
     app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
 
     yield
@@ -87,26 +84,6 @@ def create_app(
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
-    Parameters
-    ----------
-    storage:
-        Optional custom implementation of :class:`~app.ports.StoragePort`.
-        If not provided, a default in‑memory storage will be used.  In a
-        production deployment this should be replaced with a persistent
-        storage adapter such as an S3 implementation.
-
-    token_port:
-        Optional custom implementation of :class:`~app.ports.TokenPort`.
-        The default implementation uses PyJWT and symmetrical keys for
-        demonstration; a real deployment should use asymmetric keys and
-        integrate with HexIAM for tenant user authentication.
-
-    event_bus:
-        Optional implementation of :class:`~app.ports.EventBusPort`.
-        This port is used to publish analytics and audit events.  The
-        default implementation is a no‑op; a production system would
-        likely use Redis Streams or Kafka.
-
     Returns
     -------
     FastAPI
@@ -114,7 +91,6 @@ def create_app(
     """
     app = FastAPI(title="HexShare", version="0.1.0", lifespan=lifespan)
 
-    # Inject dependencies into the API router
     app.include_router(
         api_router(),
         prefix="/api/v1",

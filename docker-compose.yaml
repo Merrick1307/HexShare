@@ -1,0 +1,44 @@
+services:
+  hexshare:
+    build: .
+    ports:
+      - "8099:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
+      - HEXIAM_URL=http://localhost:8000
+      - HEXIAM_JWT_SECRET=gehfjfd7yu34v4f4ui3bc748ui8988889786789767897897ujhk43
+      - HEXSHARE_PDP_CLIENT_ID=client_b74eb755c13fcc977a78db0874dc6df7
+      - HEXSHARE_PDP_CLIENT_SECRET=g5sfD7LEnum-WIrF6_uoXUqGx7zMpMqnvXN0ckORgmM
+      - HEXSHARE_STORAGE=postgres
+      - HEXSHARE_ACCESS_CONTROL=pdp
+      - HEXSHARE_AUTHENTICATOR=hexiam
+      - HEXSHARE_POLICY_EVAL=hexiam_bitmask
+      - HEXSHARE_EVENT_BUS=none
+      - HEXSHARE_JWT_SECRET=hexshare
+
+    volumes:
+      - ./app:/app/app
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5442:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+volumes:
+  postgres_data:

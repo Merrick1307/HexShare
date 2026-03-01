@@ -36,13 +36,14 @@ from app.services import AnalyticsService
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(fastapi_app: FastAPI):
     dp_pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
 
     evaluator_name = os.getenv("HEXSHARE_POLICY_EVAL", "hexiam_bitmask")
     preferred_storage = os.getenv("HEXSHARE_STORAGE", "postgres")
     preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
     preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
+    import app.infra.bootstrap
 
     evaluator = PolicyEvaluatorRegistry.create(evaluator_name)
     authorizer = ClaimsAuthorizer(evaluator=evaluator)
@@ -62,16 +63,16 @@ async def lifespan(app: FastAPI):
     token_adapter = JWTTokenAdapter()
     event_bus = NoopEventBus()
 
-    app.state.pool = dp_pool
-    app.state.storage = persistence_layer
-    app.state.token_adapter = token_adapter
-    app.state.event_bus = event_bus
-    app.state.document_service = DocumentService(persistence_layer, event_bus)
-    app.state.link_service = LinkService(persistence_layer, token_adapter, event_bus)
-    app.state.analytics_service = AnalyticsService(persistence_layer)
-    app.state.access_control = access_control
-    app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
-    app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
+    fastapi_app.state.pool = dp_pool
+    fastapi_app.state.storage = persistence_layer
+    fastapi_app.state.token_adapter = token_adapter
+    fastapi_app.state.event_bus = event_bus
+    fastapi_app.state.document_service = DocumentService(persistence_layer, event_bus)
+    fastapi_app.state.link_service = LinkService(persistence_layer, token_adapter, event_bus)
+    fastapi_app.state.analytics_service = AnalyticsService(persistence_layer)
+    fastapi_app.state.access_control = access_control
+    fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
+    fastapi_app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
 
     yield
 

@@ -19,8 +19,9 @@ Note: this package intentionally omits dependency management files like
 Poetry environment as requested.
 """
 
+from app.main import create_app  # noqa: E402,F401
+from app.adapters import *
 __all__ = [
     "create_app",
-]
 
-from app.main import create_app  # noqa: E402,F401
+]

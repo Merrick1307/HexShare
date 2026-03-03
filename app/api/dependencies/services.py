@@ -17,3 +17,6 @@ def get_tenant_auth(request: Request):
 
 def get_share_auth(request: Request):
     return request.app.state.share_auth
+
+def get_oidc_client_service(request: Request):
+    return request.app.state.oidc_client_service

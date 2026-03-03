@@ -25,10 +25,11 @@ class OIDCClientPort(ABC):
         nonce: str,
         code_challenge: str,
         scope: str,
+        extra_params: Optional[Mapping[str, str]] = None
     ) -> str: ...
 
     @abstractmethod
-    def build_signup_url(self, *, redirect_uri: str) -> str: ...
+    def build_signup_url(self, *, redirect_uri: str, extra_params: Optional[Mapping[str, str]] = None) -> str: ...
 
     @abstractmethod
     async def exchange_code(

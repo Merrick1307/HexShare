@@ -1,5 +1,6 @@
 import base64
 import os
+from typing import Optional, Mapping
 from urllib.parse import urlencode
 
 import httpx
@@ -30,7 +31,7 @@ class HexIAMOIDCClient(OIDCClientPort):
 
     @property
     def token_endpoint(self) -> str:
-        return f"{self.iam_url}/api/v1/oidc/token"
+        return f"{self.iam_url.replace("localhost", "host.docker.internal")}/api/v1/oidc/token"
 
     @property
     def signup_endpoint(self) -> str:
@@ -44,6 +45,7 @@ class HexIAMOIDCClient(OIDCClientPort):
         nonce: str,
         code_challenge: str,
         scope: str,
+        extra_params: Optional[Mapping[str, str]] = None,
     ) -> str:
         params = {
             "client_id": self.client_id,
@@ -57,7 +59,7 @@ class HexIAMOIDCClient(OIDCClientPort):
         }
         return f"{self.authorize_endpoint}?{urlencode(params)}"
 
-    def build_signup_url(self, *, redirect_uri: str) -> str:
+    def build_signup_url(self, *, redirect_uri: str, extra_params: Optional[Mapping[str, str]] = None) -> str:
         return f"{self.signup_endpoint}?{urlencode({'client_id': self.client_id, 'redirect_uri': redirect_uri})}"
 
     async def exchange_code(self, *, code: str, redirect_uri: str, code_verifier: str) -> OIDCTokens:

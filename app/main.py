@@ -26,13 +26,18 @@ from fastapi import FastAPI
 
 from app.adapters import NoopEventBus, JWTTokenAdapter
 from app.adapters.authz.claims import ClaimsAuthorizer
+from app.adapters.flow_state.signed_jwt import SignedJWTFlowState
+from app.adapters.oidc.hexiam_client import HexIAMOIDCClient
 from app.api.router import api_router
+from app.api.auth_oidc import router as auth_oidc_router
+from app.api.user import router as user_router
 from app.auth.tenant_auth import TenantAuthDependency
 from app.auth.share_token_auth import ShareTokenDependency
 from app.infra.factories import StorageFactory, AccessControlFactory, PolicyEvaluatorRegistry, AuthenticatorFactory
 from app.services import DocumentService
 from app.services import LinkService
 from app.services import AnalyticsService
+from app.services.oidc_service import OIDCFlowService
 
 
 @asynccontextmanager
@@ -73,6 +78,14 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.access_control = access_control
     fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
     fastapi_app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
+    fastapi_app.state.oidc_clients = {
+        "hexiam": HexIAMOIDCClient(
+            iam_url=os.getenv("HEXIAM_URL", "http://localhost:8000"),
+            client_id=os.getenv("HEXSHARE_PDP_CLIENT_ID", ""),
+            client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", "")
+        )
+    }
+    fastapi_app.state.flow_state = SignedJWTFlowState(secret=os.getenv("HEXSHARE_SESSION_SECRET", ""))
 
     yield
 
@@ -95,6 +108,14 @@ def create_app(
     app.include_router(
         api_router(),
         prefix="/api/v1",
+    )
+    app.include_router(
+        auth_oidc_router,
+        prefix="/api",
+    )
+    app.include_router(
+        user_router,
+        prefix="/api/user",
     )
 
     return app

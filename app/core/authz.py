@@ -30,3 +30,6 @@ hex_iam_permission_map = {
     'activate': HEXIAMAction.ACTIVATE,
     'archive': HEXIAMAction.ARCHIVE
 }
+
+OIDC_TMP_COOKIE = "hexshare_oidc_tmp"
+AUTH_COOKIE = "hexshare_access_token"

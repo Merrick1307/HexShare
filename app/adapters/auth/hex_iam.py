@@ -25,7 +25,7 @@ class HEXIAMAuthenticator(AuthenticatorPort):
         if not self.jwt_secret:
             raise RuntimeError("Missing HEXIAM_JWT_SECRET for HS256 verification")
 
-    async def authenticate(self, bearer_token: str) -> Principal:
+    def authenticate(self, bearer_token: str) -> Principal:
         token_payload: dict[str, Any] = self._decode_token(bearer_token)
 
         scopes_str: str = token_payload.get("scope") or ""

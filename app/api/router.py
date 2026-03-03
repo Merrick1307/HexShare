@@ -5,7 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies.services import (get_document_service, get_link_service,
-                                           get_analytics_service, get_tenant_auth, get_share_auth)
+                                           get_analytics_service, get_share_auth)
+from app.auth.tenant_auth import get_tenant_auth
 from app.domain import Document, ShareLink
 from app.services import DocumentService, LinkService, AnalyticsService
 from app.auth import TenantPrincipal, ShareTokenClaims
@@ -20,7 +21,7 @@ def api_router() -> APIRouter:
         mime_type: str = Query(..., description="MIME type"),
         size: int = Query(..., description="Size in bytes"),
         storage_key: str = Query(..., description="Key in object storage"),
-        principal: TenantPrincipal = Depends(get_tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
     ) -> Document:
         return await document_service.create_document(
@@ -34,16 +35,17 @@ def api_router() -> APIRouter:
 
     @router.get("/documents", response_model=list[Document])
     async def list_documents(
-            principal: TenantPrincipal = Depends(get_tenant_auth),
+            principal: TenantPrincipal = Depends(get_tenant_auth()),
             document_service: DocumentService = Depends(get_document_service)
     ) -> list[Document]:
+        print(principal)
         docs = await document_service.list_documents(tenant_id=principal.tenant_id)
         return list(docs)
 
     @router.get("/documents/{document_id}", response_model=Document)
     async def get_document(
         document_id: str,
-        principal: TenantPrincipal = Depends(get_tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
     ) -> Document:
         doc = await document_service.get_document(
@@ -61,7 +63,7 @@ def api_router() -> APIRouter:
         can_print: bool = Query(False),
         require_email: bool = Query(False),
         allowed_emails: Optional[list[str]] = Query(None),
-        principal: TenantPrincipal = Depends(get_tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
     ) -> ShareLink:
@@ -95,7 +97,7 @@ def api_router() -> APIRouter:
     @router.get("/documents/{document_id}/analytics")
     async def document_analytics(
         document_id: str,
-        principal: TenantPrincipal = Depends(get_tenant_auth),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
         analytics_service: AnalyticsService = Depends(get_analytics_service),
     ) -> dict:
         metrics = await analytics_service.get_document_metrics(

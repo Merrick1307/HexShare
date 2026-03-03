@@ -29,5 +29,5 @@ class Principal:
 
 class AuthenticatorPort(ABC):
     @abstractmethod
-    async def authenticate(self, bearer_token: str) -> Principal:
+    def authenticate(self, bearer_token: str) -> Principal:
         raise NotImplementedError

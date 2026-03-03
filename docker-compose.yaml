@@ -1,0 +1,47 @@
+services:
+  hexshare:
+    build: .
+    ports:
+      - "8099:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - HEXIAM_URL={HEXIAM_URL}
+      - HEXIAM_JWT_SECRET=${HEXIAM_JWT_SECRET}
+      - HEXSHARE_PDP_CLIENT_ID=${HEXSHARE_PDP_CLIENT_ID}
+      - HEXSHARE_PDP_CLIENT_SECRET=${HEXSHARE_PDP_CLIENT_SECRET}
+      - HEXSHARE_STORAGE=${HEXSHARE_STORAGE}
+      - HEXSHARE_ACCESS_CONTROL=${HEXSHARE_ACCESS_CONTROL}
+      - HEXSHARE_AUTHENTICATOR=${HEXSHARE_AUTHENTICATOR}
+      - HEXSHARE_POLICY_EVAL=${HEXSHARE_POLICY_EVAL}
+      - HEXSHARE_EVENT_BUS=${HEXSHARE_EVENT_BUS}
+      - HEXSHARE_JWT_SECRET=${HEXSHARE_JWT_SECRET}
+      - HEXSHARE_SESSION_SECRET=${HEXSHARE_SESSION_SECRET}
+      - HEXSHARE_PUBLIC_URL=${HEXSHARE_PUBLIC_URL}
+      - HEXSHARE_FRONTEND_URL=${HEXSHARE_FRONTEND_URL}
+
+    volumes:
+      - ./app:/app/app
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5442:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+volumes:
+  postgres_data:

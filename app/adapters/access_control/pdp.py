@@ -46,7 +46,6 @@ class PDPAccessControl(AccessControlPort):
             resp = await client.post(
                 url,
                 json=payload,
-                # auth=(self.client_id, self.client_secret),  # Basic auth for the PDP client
             )
 
         if resp.status_code >= 400:

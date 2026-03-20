@@ -1,6 +1,8 @@
-from typing import Callable, Dict
+from __future__ import annotations
 
-from app.ports import StoragePort
+from typing import Any, Callable, Dict
+
+from app.ports import ObjectStoragePort, StoragePort
 from app.ports.access_control import AccessControlPort
 from app.ports.authn import AuthenticatorPort
 from app.ports.policy_evaluator import PolicyEvaluatorPort
@@ -17,11 +19,29 @@ class StorageFactory:
         return deco
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> StoragePort:
+    def create(cls, name: str, **kwargs: Any) -> StoragePort:
         try:
             return cls._registry[name](**kwargs)
-        except KeyError:
-            raise ValueError(f"Unknown storage adapter: {name}")
+        except KeyError as exc:
+            raise ValueError(f"Unknown storage adapter: {name}") from exc
+
+
+class ObjectStorageFactory:
+    _registry: Dict[str, Callable[..., ObjectStoragePort]] = {}
+
+    @classmethod
+    def register(cls, name: str):
+        def deco(builder: Callable[..., ObjectStoragePort]):
+            cls._registry[name] = builder
+            return builder
+        return deco
+
+    @classmethod
+    def create(cls, name: str, **kwargs: Any) -> ObjectStoragePort:
+        try:
+            return cls._registry[name](**kwargs)
+        except KeyError as exc:
+            raise ValueError(f"Unknown object storage adapter: {name}") from exc
 
 
 class PolicyEvaluatorRegistry:
@@ -35,11 +55,11 @@ class PolicyEvaluatorRegistry:
         return deco
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> PolicyEvaluatorPort:
+    def create(cls, name: str, **kwargs: Any) -> PolicyEvaluatorPort:
         try:
             return cls._registry[name](**kwargs)
-        except KeyError:
-            raise ValueError(f"Unknown policy evaluator: {name}")
+        except KeyError as exc:
+            raise ValueError(f"Unknown policy evaluator: {name}") from exc
 
 
 class AccessControlFactory:
@@ -53,11 +73,11 @@ class AccessControlFactory:
         return deco
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> AccessControlPort:
+    def create(cls, name: str, **kwargs: Any) -> AccessControlPort:
         try:
             return cls._registry[name](**kwargs)
-        except KeyError:
-            raise ValueError(f"Unknown access control adapter: {name}")
+        except KeyError as exc:
+            raise ValueError(f"Unknown access control adapter: {name}") from exc
 
 
 class AuthenticatorFactory:
@@ -71,8 +91,8 @@ class AuthenticatorFactory:
         return deco
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> AuthenticatorPort:
+    def create(cls, name: str, **kwargs: Any) -> AuthenticatorPort:
         try:
             return cls._registry[name](**kwargs)
-        except KeyError:
-            raise ValueError(f"Unknown authenticator adapter: {name}")
+        except KeyError as exc:
+            raise ValueError(f"Unknown authenticator adapter: {name}") from exc

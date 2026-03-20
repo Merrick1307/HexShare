@@ -34,6 +34,7 @@ class DocumentService:
         size: int,
         storage_key: str,
         created_by: str,
+        document_id: str | None = None,
     ) -> Document:
         """Create a new document record.
 
@@ -41,28 +42,8 @@ class DocumentService:
         to the storage backend and that a `storage_key` referencing
         the object is available.  It persists a :class:`Document` and
         returns it.
-
-        Parameters
-        ----------
-        tenant_id:
-            Workspace identifier.
-        name:
-            The file name provided by the uploader.
-        mime_type:
-            MIME type of the uploaded file.
-        size:
-            Size of the file in bytes.
-        storage_key:
-            Key or path to the file in the object store.
-        created_by:
-            Identifier of the user who uploaded the document.
-
-        Returns
-        -------
-        Document
-            The newly created document metadata record.
         """
-        doc_id = self._storage.generate_id("doc")
+        doc_id = document_id or self._storage.generate_id("doc")
         document = Document(
             id=doc_id,
             tenant_id=tenant_id,
@@ -88,11 +69,7 @@ class DocumentService:
         return document
 
     async def get_document(self, *, tenant_id: str, document_id: str) -> Document | None:
-        """Retrieve a document by ID.
-
-        Returns ``None`` if the document does not exist or belongs to a
-        different tenant.
-        """
+        """Retrieve a document by ID."""
         return await self._storage.get_document(tenant_id=tenant_id, document_id=document_id)
 
     async def list_documents(self, *, tenant_id: str) -> Iterable[Document]:

@@ -17,6 +17,8 @@ from .access_control import EdgeAccessControl, HybridAccessControl, PDPAccessCon
 from .auth import HEXIAMAuthenticator
 from .persistence import PostgresStorage, MemoryStorage
 from .authz import ClaimsAuthorizer
+from .object_storage import S3ObjectStorageAdapter, CloudFlareR2ObjectStorageAdapter
+
 
 __all__ = [
     "JWTTokenAdapter",
@@ -29,4 +31,6 @@ __all__ = [
     "ClaimsAuthorizer",
     "EdgeAccessControl",
     "PDPAccessControl",
+    "S3ObjectStorageAdapter",
+    "CloudFlareR2ObjectStorageAdapter",
 ]

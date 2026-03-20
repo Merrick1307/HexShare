@@ -12,9 +12,11 @@ testing and inversion of control.
 from .document_service import DocumentService
 from .link_service import LinkService
 from .analytics_service import AnalyticsService
+from .upload_service import UploadService
 
 __all__ = [
     "DocumentService",
     "LinkService",
     "AnalyticsService",
+    "UploadService",
 ]

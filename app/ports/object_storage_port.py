@@ -1,17 +1,8 @@
-"""
-Object storage port.
-
-This port abstracts file-byte storage concerns such as generating object
-keys, presigned upload/download URLs, metadata lookup, and deletion.
-It deliberately sits beside ``StoragePort`` rather than replacing it:
-``StoragePort`` persists HexShare metadata, while ``ObjectStoragePort``
-handles raw document bytes in an object store.
-"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -19,7 +10,8 @@ class PresignedUpload:
     object_key: str
     url: str
     method: str = "PUT"
-    headers: Mapping[str, str] | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+    form_fields: Mapping[str, str] = field(default_factory=dict)
     expires_in: int = 900
 
 
@@ -29,15 +21,13 @@ class ObjectInfo:
     size: int | None = None
     etag: str | None = None
     content_type: str | None = None
-    metadata: Mapping[str, str] | None = None
+    metadata: Mapping[str, str] = field(default_factory=dict)
 
 
 class ObjectStoragePort(ABC):
-    """Abstract base class for object storage adapters."""
-
     @abstractmethod
     def build_object_key(self, *, tenant_id: str, document_id: str, filename: str) -> str:
-        """Build a stable object key for a tenant-owned document."""
+        raise NotImplementedError
 
     @abstractmethod
     async def create_presigned_upload(
@@ -47,7 +37,7 @@ class ObjectStoragePort(ABC):
         content_type: str,
         expires_in: int = 900,
     ) -> PresignedUpload:
-        """Create a presigned URL for uploading an object."""
+        raise NotImplementedError
 
     @abstractmethod
     async def create_presigned_download(
@@ -55,14 +45,14 @@ class ObjectStoragePort(ABC):
         *,
         object_key: str,
         expires_in: int = 900,
-        filename: Optional[str] = None,
+        filename: str | None = None,
     ) -> str:
-        """Create a presigned URL for downloading an object."""
+        raise NotImplementedError
 
     @abstractmethod
     async def head_object(self, *, object_key: str) -> ObjectInfo | None:
-        """Return object metadata if the object exists."""
+        raise NotImplementedError
 
     @abstractmethod
     async def delete_object(self, *, object_key: str) -> None:
-        """Delete an object from the backing store."""
+        raise NotImplementedError

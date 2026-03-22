@@ -1,33 +1,32 @@
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 from pydantic import BaseModel, Field
 
 
 class InitiateUploadRequest(BaseModel):
-    filename: str = Field(..., min_length=1)
-    content_type: str = Field(..., min_length=1)
-    size: int = Field(..., ge=0)
+    filename: str
+    content_type: str
+    size: int = Field(ge=1)
     expires_in: int = Field(default=900, ge=60, le=3600)
 
 
 class InitiateUploadResponse(BaseModel):
     document_id: str
     object_key: str
-    method: str = "PUT"
+    method: str
     upload_url: str
     expires_in: int
-    required_headers: Dict[str, str] = Field(default_factory=dict)
+    required_headers: dict[str, str] = Field(default_factory=dict)
+    required_form_fields: dict[str, str] = Field(default_factory=dict)
 
 
 class CompleteUploadRequest(BaseModel):
     document_id: str
     object_key: str
-    name: str = Field(..., min_length=1)
-    mime_type: str = Field(..., min_length=1)
-    size: int = Field(..., ge=0)
-    etag: Optional[str] = None
+    name: str
+    mime_type: str
+    size: int = Field(ge=1)
+    etag: str | None = None
 
 
 class DownloadUrlResponse(BaseModel):

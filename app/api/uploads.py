@@ -38,6 +38,7 @@ async def initiate_upload(
         upload_url=initiated.upload.url,
         expires_in=initiated.upload.expires_in,
         required_headers=dict(initiated.upload.headers or {}),
+        required_form_fields=dict(getattr(initiated.upload, "form_fields", {}) or {}),
     )
 
 

@@ -8,6 +8,7 @@ presigned URL, then the document metadata is finalized in Postgres.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from app.domain import Document
@@ -80,7 +81,13 @@ class UploadService:
         if existing:
             raise ValueError("document_already_exists")
 
-        info = await self._object_storage.head_object(object_key=object_key)
+        info = None
+        for attempt in range(5):
+            info = await self._object_storage.head_object(object_key=object_key)
+            if info is not None:
+                break
+            if attempt < 4:
+                await asyncio.sleep(0.3 * (attempt + 1))
         if info is None:
             raise ValueError("object_not_found")
 

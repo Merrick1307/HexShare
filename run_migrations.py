@@ -205,8 +205,8 @@ def list_migrations(backend, migrations) -> int:
 
 
 def show_status(backend, migrations) -> int:
-    applied = list(backend.to_rollback(migrations))
-    pending = list(backend.to_apply(migrations))
+    pending = backend.to_apply(migrations)  # not list(...)
+    applied = backend.to_rollback(migrations)  # not list(...)
 
     print(f"Applied migrations: {len(applied)}")
     print(f"Pending migrations: {len(pending)}")

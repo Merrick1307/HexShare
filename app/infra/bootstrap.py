@@ -11,4 +11,5 @@ from app.adapters import (
     PDPAccessControl,
     S3ObjectStorageAdapter,
     CloudFlareR2ObjectStorageAdapter,
+    CloudinaryObjectStorageAdapter
 )

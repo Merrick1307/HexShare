@@ -66,6 +66,18 @@ class StoragePort(ABC):
         """Persist a visitor session."""
 
     @abstractmethod
+    async def get_visitor_session(self, *, tenant_id: str, session_id: str) -> Optional[VisitorSession]:
+        """Return a visitor session by ID if it exists and belongs to the tenant."""
+
+    @abstractmethod
+    async def get_visitor_session_by_id(self, *, session_id: str) -> Optional[VisitorSession]:
+        """Return a visitor session by ID irrespective of tenant."""
+
+    @abstractmethod
+    async def end_visitor_session(self, *, tenant_id: str, session_id: str, ended_at: datetime) -> None:
+        """Mark a visitor session as ended."""
+
+    @abstractmethod
     async def save_view_event(self, event: ViewEvent) -> None:
         """Persist a view event."""
 

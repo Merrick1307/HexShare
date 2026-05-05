@@ -11,7 +11,7 @@ introspection endpoints to validate access tokens.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, Callable
+from typing import Sequence, Callable, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -30,6 +30,7 @@ class TenantPrincipal:
     """Represents the authenticated tenant and user."""
     tenant_id: str
     user_id: str
+    token: Optional[str] = None
     roles: Sequence[str] | None = None
 
 
@@ -61,10 +62,9 @@ class TenantAuthDependency:
             tenant_id = payload.tenant_id
             user_id = payload.subject or payload.user_id
             if not tenant_id or not user_id:
-                print(payload)
                 raise HTTPException(status_code=401, detail="Token missing tenant or user claims")
             roles = payload.roles
-            return TenantPrincipal(tenant_id=tenant_id, user_id=user_id, roles=roles)
+            return TenantPrincipal(tenant_id=tenant_id, user_id=user_id, roles=roles, token=token)
         return verify
 
 

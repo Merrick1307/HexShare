@@ -53,7 +53,7 @@ async def lifespan(fastapi_app: FastAPI):
         preferred_access_control,
         authorizer=authorizer,
         authenticator=authenticator,
-        iam_url=os.getenv("HEXIAM_URL", "http://localhost:8000"),
+        iam_url="http://host.docker.internal:8000",
         client_id=os.getenv("HEXSHARE_PDP_CLIENT_ID", ""),
         client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", ""),
     )

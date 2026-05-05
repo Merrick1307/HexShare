@@ -12,12 +12,14 @@ from app.api.dependencies.services import (
     get_document_service,
     get_link_service,
     get_share_auth,
-    get_viewer_service,
+    get_viewer_service, get_access_control,
 )
 from app.auth import ShareTokenClaims, TenantPrincipal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
+from app.core.authz import HEXIAMAction
 from app.domain import Document, ShareLink
+from app.ports.access_control import AccessControlPort, ResourceCtx
 from app.schemas.share import ShareLinkResponse
 from app.schemas.viewer import (
     CreateViewSessionRequest,
@@ -62,7 +64,13 @@ def api_router() -> APIRouter:
         storage_key: str = Query(..., description="Key in object storage"),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
+        access_control: AccessControlPort = Depends(get_access_control),
     ) -> Document:
+        await access_control.authorize(
+            bearer_token=principal.token,
+            action="WRITE",
+            resource=ResourceCtx(id="documents", type="documents"),
+        )
         return await document_service.create_document(
             tenant_id=principal.tenant_id,
             name=name,
@@ -76,7 +84,13 @@ def api_router() -> APIRouter:
     async def list_documents(
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
+        access_control: AccessControlPort = Depends(get_access_control),
     ) -> list[Document]:
+        await access_control.authorize(
+            bearer_token=principal.token,
+            action="READ",
+            resource=ResourceCtx(id="documents", type="documents"),
+        )
         docs = await document_service.list_documents(tenant_id=principal.tenant_id)
         return list(docs)
 
@@ -85,7 +99,13 @@ def api_router() -> APIRouter:
         document_id: str,
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
+        access_control: AccessControlPort = Depends(get_access_control),
     ) -> Document:
+        await access_control.authorize(
+            bearer_token=principal.token,
+            action="READ",
+            resource=ResourceCtx(id="document_details", type="document"),
+        )
         doc = await document_service.get_document(
             tenant_id=principal.tenant_id,
             document_id=document_id,

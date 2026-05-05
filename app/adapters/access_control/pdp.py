@@ -29,23 +29,23 @@ class PDPAccessControl(AccessControlPort):
         """
         Calls HexIAM PDP. HexIAM verifies token + evaluates policy.
         """
-        url = f"{self.iam_url}/pdp/decide"
+        url = f"{self.iam_url}/api/v1/pdp/decide"
 
         payload = {
-            "token": bearer_token,
             "permission": action,
-            "resource": None if resource is None else {
-                "type": resource.type,
-                "id": resource.id,
-                "attrs": dict(resource.attrs or {}),
-            },
+            "resource": None if resource is None else resource.id,
             "context": dict(context or {}),
+        }
+        headers = {
+            "Authorization": f"Bearer {bearer_token}",
+            "Content-Type": "application/json",
         }
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(
                 url,
                 json=payload,
+                headers=headers,
             )
 
         if resp.status_code >= 400:
@@ -76,7 +76,7 @@ class PDPAccessControl(AccessControlPort):
 
 
 def _load_pdp_config():
-    iam_url = os.getenv("HEXIAM_URL", "http://localhost:8000")
+    iam_url = "http://host.docker.internal:8000"
     client_id = os.getenv("HEXSHARE_CLIENT_ID")
     client_secret = os.getenv("HEXIAM_CLIENT_SECRET")
     timeout_s = float(os.getenv("HEXIAM_PDP_TIMEOUT_S", 5.0))

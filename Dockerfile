@@ -10,6 +10,9 @@ RUN poetry install --no-root
 
 COPY . .
 
+COPY entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["poetry", "run", "python", "-m", "app.main"]
+ENTRYPOINT ["/app/entrypoint.sh"]

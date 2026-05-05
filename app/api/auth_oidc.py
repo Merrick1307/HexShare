@@ -1,7 +1,7 @@
 import os
 
 from fastapi import APIRouter, Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse
 
 from app.api.dependencies.services import get_oidc_client_service
 from app.core.authz import OIDC_TMP_COOKIE, AUTH_COOKIE
@@ -23,6 +23,10 @@ def _safe_next(next_url: str) -> str:
     if not next_url.startswith("/") or next_url.startswith("//"):
         return "/"
     return next_url
+
+
+def _frontend_dashboard_url() -> str:
+    return f"{os.getenv('HEXSHARE_FRONTEND_URL', 'http://localhost:3003').rstrip('/')}/dashboard"
 
 
 @router.get("/auth/login")
@@ -53,7 +57,7 @@ async def callback(
     if not tmp:
         # user hit back/refresh after successful login
         if request.cookies.get(AUTH_COOKIE):
-            return RedirectResponse("/", status_code=302)
+            return RedirectResponse(_frontend_dashboard_url(), status_code=302)
         raise HTTPException(400, "Missing OIDC temp cookie")
     oidc_clients = request.app.state.oidc_clients
     svc = OIDCFlowService(

@@ -17,6 +17,10 @@ def get_upload_service(request: Request):
     return request.app.state.upload_service
 
 
+def get_viewer_service(request: Request):
+    return request.app.state.viewer_service
+
+
 def get_object_storage(request: Request):
     return request.app.state.object_storage
 

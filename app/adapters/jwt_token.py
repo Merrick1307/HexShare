@@ -27,6 +27,12 @@ class JWTTokenAdapter(TokenPort):
         self._secret = secret or os.environ.get("HEXSHARE_JWT_SECRET", uuid.uuid4().hex)
         self._revoked_jtis: Dict[str, datetime] = {}
 
+    @staticmethod
+    def _as_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     def generate_jti(self) -> str:
         return uuid.uuid4().hex
 
@@ -56,10 +62,8 @@ class JWTTokenAdapter(TokenPort):
     def decode_share_token(self, token: str) -> Dict[str, Any]:
         payload = jwt.decode(token, self._secret, algorithms=["HS256"])
         jti: str = payload.get("jti")
-        # Check revocation list
         now = datetime.now(timezone.utc)
-        # Clean expired revocations
-        expired = [key for key, exp in self._revoked_jtis.items() if exp <= now]
+        expired = [key for key, exp in self._revoked_jtis.items() if self._as_utc(exp) <= now]
         for key in expired:
             self._revoked_jtis.pop(key, None)
         if jti in self._revoked_jtis:
@@ -67,6 +71,6 @@ class JWTTokenAdapter(TokenPort):
         return payload
 
     async def revoke_jti(self, jti: str, expires_at: datetime) -> None:
-        self._revoked_jtis[jti] = expires_at
+        self._revoked_jtis[jti] = self._as_utc(expires_at)
 
 

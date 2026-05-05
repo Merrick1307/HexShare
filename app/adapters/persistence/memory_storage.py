@@ -52,18 +52,31 @@ class MemoryStorage(StoragePort):
         links = list(self._share_links.get(tenant_id, {}).values())
         if document_id:
             links = [l for l in links if l.document_id == document_id]
-        return links
+        return sorted(links, key=lambda item: item.created_at, reverse=True)
 
     async def revoke_share_link(
         self, *, tenant_id: str, link_id: str, revoked_at: Optional[datetime]
     ) -> None:
         link = self._share_links.get(tenant_id, {}).get(link_id)
         if link:
-            # update link (replace with new instance to avoid side effects)
             link.revoked_at = revoked_at
 
     async def save_visitor_session(self, session: VisitorSession) -> None:
         self._visitor_sessions[session.tenant_id][session.id] = session
+
+    async def get_visitor_session(self, *, tenant_id: str, session_id: str) -> Optional[VisitorSession]:
+        return self._visitor_sessions.get(tenant_id, {}).get(session_id)
+
+    async def get_visitor_session_by_id(self, *, session_id: str) -> Optional[VisitorSession]:
+        for tenant_sessions in self._visitor_sessions.values():
+            if session_id in tenant_sessions:
+                return tenant_sessions[session_id]
+        return None
+
+    async def end_visitor_session(self, *, tenant_id: str, session_id: str, ended_at: datetime) -> None:
+        session = self._visitor_sessions.get(tenant_id, {}).get(session_id)
+        if session:
+            session.ended_at = ended_at
 
     async def save_view_event(self, event: ViewEvent) -> None:
         self._view_events[event.tenant_id].append(event)

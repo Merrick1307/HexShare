@@ -14,7 +14,7 @@ class EdgeAccessControl(AccessControlPort):
 
     async def authorize(self, *, bearer_token: str, action: str, resource: Optional[ResourceCtx] = None,
                         context: Optional[Mapping[str, Any]] = None) -> Principal:
-        principal = await self.authenticator.authenticate(bearer_token)
+        principal = self.authenticator.authenticate(bearer_token)
         await self.authorizer.authorize(
             principal,
             action=action,
@@ -25,5 +25,5 @@ class EdgeAccessControl(AccessControlPort):
 
 
 @AccessControlFactory.register("edge")
-def create_edge_access_control(authenticator: AuthenticatorPort, authorizer: AuthorizerPort) -> AccessControlPort:
+def create_edge_access_control(*, authenticator: AuthenticatorPort, authorizer: AuthorizerPort, **_) -> AccessControlPort:
     return EdgeAccessControl(authenticator, authorizer)

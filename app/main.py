@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters import NoopEventBus, JWTTokenAdapter
 from app.adapters.authz.claims import ClaimsAuthorizer
@@ -26,7 +27,7 @@ from app.infra.factories import (
     PolicyEvaluatorRegistry,
     StorageFactory,
 )
-from app.services import AnalyticsService, DocumentService, LinkService, UploadService
+from app.services import AnalyticsService, DocumentService, LinkService, UploadService, ViewerService
 
 
 @asynccontextmanager
@@ -37,7 +38,7 @@ async def lifespan(fastapi_app: FastAPI):
     preferred_storage = os.getenv("HEXSHARE_STORAGE", "postgres")
     preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
     preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
-    preferred_object_storage = os.getenv("HEXSHARE_OBJECT_STORAGE", "s3")
+    preferred_object_storage = os.getenv("HEXSHARE_OBJECT_STORAGE", "cloudinary")
 
     import app.infra.bootstrap  # noqa: F401
 
@@ -52,7 +53,7 @@ async def lifespan(fastapi_app: FastAPI):
         preferred_access_control,
         authorizer=authorizer,
         authenticator=authenticator,
-        iam_url=os.getenv("HEXIAM_URL", "http://localhost:8000"),
+        iam_url="http://host.docker.internal:8000",
         client_id=os.getenv("HEXSHARE_PDP_CLIENT_ID", ""),
         client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", ""),
     )
@@ -60,10 +61,17 @@ async def lifespan(fastapi_app: FastAPI):
     token_adapter = JWTTokenAdapter()
     event_bus = NoopEventBus()
     document_service = DocumentService(persistence_layer, event_bus)
+    link_service = LinkService(persistence_layer, token_adapter, event_bus)
     upload_service = UploadService(
         metadata_storage=persistence_layer,
         object_storage=object_storage,
         document_service=document_service,
+    )
+    viewer_service = ViewerService(
+        storage=persistence_layer,
+        object_storage=object_storage,
+        document_service=document_service,
+        link_service=link_service,
     )
 
     fastapi_app.state.pool = dp_pool
@@ -73,7 +81,8 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.event_bus = event_bus
     fastapi_app.state.document_service = document_service
     fastapi_app.state.upload_service = upload_service
-    fastapi_app.state.link_service = LinkService(persistence_layer, token_adapter, event_bus)
+    fastapi_app.state.link_service = link_service
+    fastapi_app.state.viewer_service = viewer_service
     fastapi_app.state.analytics_service = AnalyticsService(persistence_layer)
     fastapi_app.state.access_control = access_control
     fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
@@ -100,6 +109,14 @@ def create_app(*args, **kwargs) -> FastAPI:
     app.include_router(auth_oidc_router, prefix="/api")
     app.include_router(user_router, prefix="/api/user")
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     return app
 
 
@@ -107,4 +124,5 @@ if __name__ == "__main__":
     import uvicorn
 
     app = create_app()
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,22 +1,17 @@
 """
 Use cases and application services for HexShare.
-
-The services encapsulate business logic and orchestrate interactions
-between domain models and infrastructure ports.  They act as the API
-layer's dependencies, isolating the web interface from the details of
-storage, token management, and event broadcasting.  Each service
-accepts port implementations via its constructor to facilitate unit
-testing and inversion of control.
 """
 
+from .analytics_service import AnalyticsService
 from .document_service import DocumentService
 from .link_service import LinkService
-from .analytics_service import AnalyticsService
 from .upload_service import UploadService
+from .viewer_service import ViewerService
 
 __all__ = [
+    "AnalyticsService",
     "DocumentService",
     "LinkService",
-    "AnalyticsService",
     "UploadService",
+    "ViewerService",
 ]

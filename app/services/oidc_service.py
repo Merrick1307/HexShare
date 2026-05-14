@@ -1,11 +1,12 @@
 import base64
 import hashlib
+import os
 import secrets
 from dataclasses import dataclass
 from typing import Optional, Mapping
 
+from app.core.flow_state import SignedJWTFlowState
 from app.ports.oidc_client import OIDCClientPort, OIDCTokens
-from app.ports.flow_state import FlowStatePort
 
 
 @dataclass(frozen=True)
@@ -21,9 +22,12 @@ class LoginFinish:
 
 
 class OIDCFlowService:
-    def __init__(self, oidc: OIDCClientPort, state: FlowStatePort) -> None:
+    def __init__(self, oidc: OIDCClientPort, secret: Optional[str] = None) -> None:
         self.oidc = oidc
-        self.state = state
+        resolved_secret = secret or os.getenv("HEXSHARE_SESSION_SECRET")
+        if not resolved_secret:
+            raise RuntimeError("Missing HEXSHARE_SESSION_SECRET")
+        self.state = SignedJWTFlowState(secret=resolved_secret)
 
     def _pkce_pair(self) -> tuple[str, str]:
         verifier = secrets.token_urlsafe(48)

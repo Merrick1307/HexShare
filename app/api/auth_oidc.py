@@ -37,10 +37,7 @@ async def login(
 ):
     next: str = _safe_next(next)
     oidc_clients = request.app.state.oidc_clients
-    svc = OIDCFlowService(
-        oidc=oidc_clients[idp],
-        state=request.app.state.flow_state,
-    )
+    svc = OIDCFlowService(oidc=oidc_clients[idp])
     start = svc.start_login(redirect_uri=_redirect_uri(request), next_url=next)
     resp = RedirectResponse(start.authorize_url, status_code=302)
     resp.set_cookie(OIDC_TMP_COOKIE, start.tmp_state_token, httponly=True, samesite="lax", path="/", max_age=600)
@@ -60,10 +57,7 @@ async def callback(
             return RedirectResponse(_frontend_dashboard_url(), status_code=302)
         raise HTTPException(400, "Missing OIDC temp cookie")
     oidc_clients = request.app.state.oidc_clients
-    svc = OIDCFlowService(
-        oidc=oidc_clients[idp],
-        state=request.app.state.flow_state,
-    )
+    svc = OIDCFlowService(oidc=oidc_clients[idp])
     try:
         finish = await svc.finish_login(
             redirect_uri=_redirect_uri(request),
@@ -95,10 +89,7 @@ async def auth_signup(request: Request, next: str = "/api/user/dashboard", idp: 
       - signup-via-authorize providers: set tmp cookie + redirect to /authorize
     """
     oidc_clients = request.app.state.oidc_clients
-    svc = OIDCFlowService(
-        oidc=oidc_clients[idp],
-        state=request.app.state.flow_state,
-    )
+    svc = OIDCFlowService(oidc=oidc_clients[idp])
     next_url = _safe_next(next)
 
     res = svc.signup_start(

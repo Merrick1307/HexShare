@@ -11,8 +11,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters import NoopEventBus, JWTTokenAdapter
-from app.adapters.authz.claims import ClaimsAuthorizer
-from app.adapters.flow_state.signed_jwt import SignedJWTFlowState
+from app.adapters.authz.hex_iam import HexIAMAuthorizer
 from app.adapters.oidc.hexiam_client import HexIAMOIDCClient
 from app.api.auth_oidc import router as auth_oidc_router
 from app.api.router import api_router
@@ -24,7 +23,6 @@ from app.infra.factories import (
     AccessControlFactory,
     AuthenticatorFactory,
     ObjectStorageFactory,
-    PolicyEvaluatorRegistry,
     StorageFactory,
 )
 from app.services import AnalyticsService, DocumentService, LinkService, UploadService, ViewerService
@@ -34,7 +32,6 @@ from app.services import AnalyticsService, DocumentService, LinkService, UploadS
 async def lifespan(fastapi_app: FastAPI):
     dp_pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
 
-    evaluator_name = os.getenv("HEXSHARE_POLICY_EVAL", "hexiam_bitmask")
     preferred_storage = os.getenv("HEXSHARE_STORAGE", "postgres")
     preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
     preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
@@ -42,8 +39,7 @@ async def lifespan(fastapi_app: FastAPI):
 
     import app.infra.bootstrap  # noqa: F401
 
-    evaluator = PolicyEvaluatorRegistry.create(evaluator_name)
-    authorizer = ClaimsAuthorizer(evaluator=evaluator)
+    authorizer = HexIAMAuthorizer()
     authenticator = AuthenticatorFactory.create(preferred_authenticator)
 
     persistence_layer = StorageFactory.create(preferred_storage, pool=dp_pool)
@@ -94,7 +90,6 @@ async def lifespan(fastapi_app: FastAPI):
             client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", ""),
         )
     }
-    fastapi_app.state.flow_state = SignedJWTFlowState(secret=os.getenv("HEXSHARE_SESSION_SECRET", ""))
 
     yield
 

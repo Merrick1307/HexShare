@@ -1,27 +1,30 @@
+from app.core.authz import HEXIAMAction
 from app.ports.authn import Principal
 from app.ports.authz import AuthorizerPort, AuthorizationError
-from app.ports.policy_evaluator import PolicyEvaluatorPort
 
 
-class ClaimsAuthorizer(AuthorizerPort):
-    def __init__(self, evaluator: PolicyEvaluatorPort) -> None:
-        self.evaluator = evaluator
+class HexIAMAuthorizer(AuthorizerPort):
+    def __init__(self) -> None:
+        pass
 
     async def authorize(
             self, principal: Principal, action: str, *,
             resource_id: str | None = None, context=None
     ) -> None:
-        ok = self.evaluator.evaluate(
-            policy=principal.policy or {},
-            action=action,
-            resource=resource_id,
-            context=context,
-        )
-        if not ok:
+        if not resource_id:
+            raise AuthorizationError("Missing resource ID")
+        bitmask = int(principal.policy.get(resource_id, 0) or 0)
+        key = action.upper()
+
+        if key not in HEXIAMAction.__members__:
+            raise AuthorizationError("unknown action")
+
+        required = HEXIAMAction[key].value
+        if not (bitmask & required):
             raise AuthorizationError("forbidden")
+        return None
 
-
-# class ClaimsAuthorizer(AuthorizerPort):
+# class HexIAMAuthorizer(AuthorizerPort):
 #
 #     def __init__(self) -> None:
 #         pass

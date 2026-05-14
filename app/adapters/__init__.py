@@ -12,11 +12,10 @@ S3 storage, Redis Streams event bus).
 
 from .jwt_token import JWTTokenAdapter
 from .noop_event_bus import NoopEventBus
-from .policy_evaluator import HexIamBitmaskEvaluator
 from .access_control import EdgeAccessControl, HybridAccessControl, PDPAccessControl
 from .auth import HEXIAMAuthenticator
 from .persistence import PostgresStorage, MemoryStorage
-from .authz import ClaimsAuthorizer
+from .authz import HexIAMAuthorizer
 from .object_storage import S3ObjectStorageAdapter, CloudFlareR2ObjectStorageAdapter, CloudinaryObjectStorageAdapter
 
 
@@ -25,10 +24,9 @@ __all__ = [
     "NoopEventBus",
     "HEXIAMAuthenticator",
     "HybridAccessControl",
-    "HexIamBitmaskEvaluator",
     "PostgresStorage",
     "MemoryStorage",
-    "ClaimsAuthorizer",
+    "HexIAMAuthorizer",
     "EdgeAccessControl",
     "PDPAccessControl",
     "S3ObjectStorageAdapter",

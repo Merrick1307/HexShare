@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from app.infra.factories import OIDCClientFactory
 from app.ports.oidc_client import OIDCClientPort, OIDCTokens
 
 
@@ -117,3 +118,8 @@ class HexIAMOIDCClient(OIDCClientPort):
             scope=data.get("scope"),
             raw=data,
         )
+
+
+@OIDCClientFactory.register("hexiam")
+def create_hexiam_oidc_client(**kwargs) -> OIDCClientPort:
+    return HexIAMOIDCClient()

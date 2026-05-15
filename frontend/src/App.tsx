@@ -1,0 +1,40 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Layout } from './components/Layout';
+import { Landing } from './pages/Landing';
+import { Login } from './pages/Login';
+import { Signup } from './pages/Signup';
+import { Dashboard } from './pages/Dashboard';
+import { DocumentDetails } from './pages/DocumentDetails';
+import { Groups } from './pages/Groups';
+import { GroupDetails } from './pages/GroupDetails';
+import { ViewDocument } from './pages/ViewDocument';
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/view/:token" element={<ViewDocument />} />
+        
+        {/* Authenticated Routes */}
+        <Route element={<Layout />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/documents/:id" element={<DocumentDetails />} />
+          <Route path="/groups" element={<Groups />} />
+          <Route path="/groups/:id" element={<GroupDetails />} />
+        </Route>
+        
+        <Route path="*" element={<div className="p-8 text-zinc-500">Page not found.</div>} />
+      </Routes>
+    </Router>
+  );
+}
+
+

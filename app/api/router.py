@@ -9,7 +9,9 @@ from fastapi.responses import StreamingResponse
 
 from app.api.dependencies.services import (
     get_analytics_service,
+    get_document_group_service,
     get_document_service,
+    get_iam_policy,
     get_link_service,
     get_share_auth,
     get_viewer_service, get_access_control,
@@ -17,9 +19,9 @@ from app.api.dependencies.services import (
 from app.auth import ShareTokenClaims, TenantPrincipal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
-from app.core.authz import HEXIAMAction
-from app.domain import Document, ShareLink
-from app.ports.access_control import AccessControlPort, ResourceCtx
+from app.core.authz import GenericResources, ResourceAction
+from app.domain import Document, DocumentGroup, ShareLink
+from app.ports.access_control import AccessControlPort, AccessDenied, ResourceCtx
 from app.schemas.share import ShareLinkResponse
 from app.schemas.viewer import (
     CreateViewSessionRequest,
@@ -27,7 +29,13 @@ from app.schemas.viewer import (
     ShareLinkInspectionResponse,
     ViewerHeartbeatRequest,
 )
-from app.services import AnalyticsService, DocumentService, LinkService, ViewerService
+from app.services import (
+    AnalyticsService,
+    DocumentGroupService,
+    DocumentService,
+    LinkService,
+    ViewerService,
+)
 
 
 def _utcnow() -> datetime:
@@ -69,7 +77,7 @@ def api_router() -> APIRouter:
         await access_control.authorize(
             bearer_token=principal.token,
             action="WRITE",
-            resource=ResourceCtx(id="documents", type="documents"),
+            resource=ResourceCtx(id=GenericResources.DOCUMENTS.value, type="documents"),
         )
         return await document_service.create_document(
             tenant_id=principal.tenant_id,
@@ -89,9 +97,9 @@ def api_router() -> APIRouter:
         await access_control.authorize(
             bearer_token=principal.token,
             action="READ",
-            resource=ResourceCtx(id="documents", type="documents"),
+            resource=ResourceCtx(id=GenericResources.DOCUMENTS.value, type="documents"),
         )
-        docs = await document_service.list_documents(tenant_id=principal.tenant_id)
+        docs = await document_service.list_accessible_documents(principal=principal)
         return list(docs)
 
     @router.get("/documents/{document_id}", response_model=Document)
@@ -99,20 +107,53 @@ def api_router() -> APIRouter:
         document_id: str,
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
-        access_control: AccessControlPort = Depends(get_access_control),
     ) -> Document:
-        await access_control.authorize(
-            bearer_token=principal.token,
-            action="READ",
-            resource=ResourceCtx(id="document_details", type="document"),
-        )
-        doc = await document_service.get_document(
-            tenant_id=principal.tenant_id,
-            document_id=document_id,
-        )
-        if not doc:
+        # No HexIAM type-level gate here; instance-level only.
+        try:
+            return await document_service.require_document_access(
+                principal=principal,
+                document_id=document_id,
+                required=ResourceAction.READ,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
             raise HTTPException(status_code=404, detail="Document not found")
-        return doc
+
+    @router.patch("/documents/{document_id}/group", response_model=Document)
+    async def move_document_to_group(
+        document_id: str,
+        group_id: Optional[str] = Query(None, description="Target group ID, or null to remove from group"),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> Document:
+        """Move a document to a group or remove it from its current group."""
+        try:
+            return await document_service.move_document_to_group(
+                principal=principal,
+                document_id=document_id,
+                group_id=group_id,
+            )
+        except AccessDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+    @router.delete("/documents/{document_id}", status_code=204)
+    async def delete_document(
+        document_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> None:
+        try:
+            await document_service.delete_document(
+                principal=principal,
+                document_id=document_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
 
     @router.get("/links", response_model=list[ShareLinkResponse])
     async def list_links(
@@ -133,11 +174,15 @@ def api_router() -> APIRouter:
         document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
     ) -> list[ShareLinkResponse]:
-        doc = await document_service.get_document(
-            tenant_id=principal.tenant_id,
-            document_id=document_id,
-        )
-        if not doc:
+        try:
+            await document_service.require_document_access(
+                principal=principal,
+                document_id=document_id,
+                required=ResourceAction.READ,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
             raise HTTPException(status_code=404, detail="Document not found")
         links = await link_service.list_share_links(
             tenant_id=principal.tenant_id,
@@ -161,10 +206,15 @@ def api_router() -> APIRouter:
         document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
     ) -> ShareLinkResponse:
-        if not await document_service.get_document(
-            tenant_id=principal.tenant_id,
-            document_id=document_id,
-        ):
+        try:
+            await document_service.require_document_access(
+                principal=principal,
+                document_id=document_id,
+                required=ResourceAction.MANAGE,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
             raise HTTPException(status_code=404, detail="Document not found")
         link = await link_service.create_share_link(
             tenant_id=principal.tenant_id,
@@ -183,8 +233,24 @@ def api_router() -> APIRouter:
     async def revoke_link(
         link_id: str,
         principal: TenantPrincipal = Depends(get_tenant_auth()),
+        document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
     ) -> None:
+        link = await link_service.get_share_link(
+            tenant_id=principal.tenant_id, link_id=link_id
+        )
+        if not link:
+            raise HTTPException(status_code=404, detail="Link not found")
+        try:
+            await document_service.require_document_access(
+                principal=principal,
+                document_id=link.document_id,
+                required=ResourceAction.MANAGE,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
         await link_service.revoke_share_link(
             tenant_id=principal.tenant_id,
             link_id=link_id,
@@ -196,13 +262,209 @@ def api_router() -> APIRouter:
     async def document_analytics(
         document_id: str,
         principal: TenantPrincipal = Depends(get_tenant_auth()),
+        document_service: DocumentService = Depends(get_document_service),
         analytics_service: AnalyticsService = Depends(get_analytics_service),
     ) -> dict:
+        try:
+            await document_service.require_document_access(
+                principal=principal,
+                document_id=document_id,
+                required=ResourceAction.READ,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
         metrics = await analytics_service.get_document_metrics(
             tenant_id=principal.tenant_id,
             document_id=document_id,
         )
         return metrics
+
+
+    @router.get("/document-groups", response_model=list[DocumentGroup])
+    async def list_document_groups(
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> list[DocumentGroup]:
+        groups = await group_service.list_user_groups(principal=principal)
+        return list(groups)
+
+    @router.post("/document-groups", response_model=DocumentGroup)
+    async def create_document_group(
+        name: str = Query(..., description="Group name"),
+        description: Optional[str] = Query(None),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> DocumentGroup:
+        try:
+            return await group_service.create_group(
+                principal=principal, name=name, description=description
+            )
+        except AccessDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+
+    @router.get("/document-groups/{group_id}", response_model=DocumentGroup)
+    async def get_document_group(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> DocumentGroup:
+        try:
+            return await group_service.get_group(principal=principal, group_id=group_id)
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+    @router.patch("/document-groups/{group_id}", response_model=DocumentGroup)
+    async def update_document_group(
+        group_id: str,
+        name: Optional[str] = Query(None),
+        description: Optional[str] = Query(None),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> DocumentGroup:
+        try:
+            return await group_service.update_group(
+                principal=principal,
+                group_id=group_id,
+                name=name,
+                description=description,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+    @router.delete("/document-groups/{group_id}", status_code=204)
+    async def delete_document_group(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> None:
+        try:
+            await group_service.delete_group(principal=principal, group_id=group_id)
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return None
+
+    @router.get("/document-groups/{group_id}/documents", response_model=list[Document])
+    async def list_document_group_documents(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> list[Document]:
+        try:
+            docs = await group_service.list_group_documents(
+                principal=principal, group_id=group_id
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return list(docs)
+
+    @router.post("/document-groups/{group_id}/documents", response_model=Document)
+    async def create_document_in_group(
+        group_id: str,
+        name: str = Query(..., description="Name of the document"),
+        mime_type: str = Query(..., description="MIME type"),
+        size: int = Query(..., description="Size in bytes"),
+        storage_key: str = Query(..., description="Key in object storage"),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        document_service: DocumentService = Depends(get_document_service),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> Document:
+        # Verify caller has WRITE on the group; also ensures group exists.
+        try:
+            await group_service.get_group(
+                principal=principal, group_id=group_id, required=ResourceAction.WRITE
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return await document_service.create_document(
+            tenant_id=principal.tenant_id,
+            name=name,
+            mime_type=mime_type,
+            size=size,
+            storage_key=storage_key,
+            created_by=principal.user_id,
+            room_id=group_id,
+        )
+
+    @router.post("/document-groups/{group_id}/members", status_code=201)
+    async def add_group_member(
+        group_id: str,
+        user_id: str = Query(..., description="User ID to add as member"),
+        role: str = Query("member", description="Role: 'member' or 'owner'"),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> dict:
+        """Add a member to a group. Only owners can add members."""
+        try:
+            await group_service.add_member(
+                principal=principal,
+                group_id=group_id,
+                member_user_id=user_id,
+                role=role,
+            )
+        except AccessDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return {"status": "ok", "user_id": user_id, "role": role}
+
+    @router.delete("/document-groups/{group_id}/members/{user_id}", status_code=204)
+    async def remove_group_member(
+        group_id: str,
+        user_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> None:
+        """Remove a member from a group. Only owners can remove members."""
+        try:
+            await group_service.remove_member(
+                principal=principal,
+                group_id=group_id,
+                member_user_id=user_id,
+            )
+        except AccessDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        return None
+
+    @router.get("/workspace/users")
+    async def list_workspace_users(
+        page: int = Query(1, ge=1, description="Page number"),
+        page_size: int = Query(20, ge=1, le=100, description="Page size"),
+        search: Optional[str] = Query(None, description="Search filter"),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        iam_policy = Depends(get_iam_policy),
+    ) -> dict:
+        """List users in the workspace, excluding the current user."""
+        from app.ports.iam_policy import IAMPolicyError
+        try:
+            result = await iam_policy.list_tenant_users(
+                tenant_id=principal.tenant_id,
+                page=page,
+                page_size=page_size,
+                search=search,
+            )
+            # Filter out the current user
+            users = result.get("users", result.get("items", []))
+            users = [u for u in users if u.get("id") != principal.user_id and u.get("user_id") != principal.user_id]
+            return {
+                "users": users,
+                "total": result.get("total", len(users)),
+                "page": page,
+                "page_size": page_size,
+            }
+        except IAMPolicyError as exc:
+            raise HTTPException(status_code=502, detail=f"Failed to list users: {exc}")
 
     @router.get("/view/{token}", response_model=ShareLinkInspectionResponse)
     async def inspect_view_document(

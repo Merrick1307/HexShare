@@ -6,10 +6,16 @@ import time
 from pathlib import PurePosixPath
 from typing import Any, Optional
 
-import cloudinary
-from cloudinary import api as cloudinary_api
-from cloudinary import uploader as cloudinary_uploader
-from cloudinary import utils as cloudinary_utils
+try:
+    import cloudinary
+    from cloudinary import api as cloudinary_api
+    from cloudinary import uploader as cloudinary_uploader
+    from cloudinary import utils as cloudinary_utils
+except ImportError:
+    cloudinary = None  # type: ignore
+    cloudinary_api = None  # type: ignore
+    cloudinary_uploader = None  # type: ignore
+    cloudinary_utils = None  # type: ignore
 
 from app.infra.factories import ObjectStorageFactory
 from app.ports.object_storage_port import ObjectInfo, ObjectStoragePort, PresignedUpload

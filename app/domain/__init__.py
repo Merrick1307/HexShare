@@ -16,10 +16,20 @@ Key entities include:
 
 """
 
-from .models import Document, ShareLink, VisitorSession, ViewEvent, EventType
+from .models import (
+    Document,
+    DocumentGroup,
+    DocumentPermission,
+    ShareLink,
+    VisitorSession,
+    ViewEvent,
+    EventType,
+)
 
 __all__ = [
     "Document",
+    "DocumentGroup",
+    "DocumentPermission",
     "ShareLink",
     "VisitorSession",
     "ViewEvent",

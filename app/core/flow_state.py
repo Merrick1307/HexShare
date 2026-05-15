@@ -2,10 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 import jwt
 
-from app.ports.flow_state import FlowStatePort
-
-
-class SignedJWTFlowState(FlowStatePort):
+class SignedJWTFlowState:
     def __init__(self, *, secret: str | None = None) -> None:
         self.secret = secret or os.getenv("HEXSHARE_SESSION_SECRET")
         if not self.secret:

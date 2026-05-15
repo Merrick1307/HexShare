@@ -14,7 +14,14 @@ from typing import Iterable, Optional
 
 from datetime import datetime
 
-from app.domain import Document, ShareLink, VisitorSession, ViewEvent
+from app.domain import (
+    Document,
+    DocumentGroup,
+    DocumentPermission,
+    ShareLink,
+    VisitorSession,
+    ViewEvent,
+)
 
 
 class StoragePort(ABC):
@@ -86,3 +93,82 @@ class StoragePort(ABC):
         self, *, tenant_id: str, document_id: str
     ) -> Iterable[ViewEvent]:
         """List view events for a specific document."""
+
+    @abstractmethod
+    async def save_document_permission(self, permission: DocumentPermission) -> None:
+        """Insert or replace a document permission row."""
+
+    @abstractmethod
+    async def get_document_permission(
+        self, *, tenant_id: str, document_id: str, user_id: str
+    ) -> Optional[DocumentPermission]:
+        """Return the permission row for ``(document, user)`` if any."""
+
+    @abstractmethod
+    async def revoke_document_permission(
+        self, *, tenant_id: str, document_id: str, user_id: str
+    ) -> None:
+        """Remove a user's permission on a document."""
+
+    @abstractmethod
+    async def delete_document(self, *, tenant_id: str, document_id: str) -> None:
+        """Remove a document and all its associated data."""
+
+    @abstractmethod
+    async def list_document_permissions(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[DocumentPermission]:
+        """Return every permission row for a document."""
+
+    @abstractmethod
+    async def list_ungrouped_documents_by_permission(
+        self, *, tenant_id: str, user_id: str, required_permission: int
+    ) -> Iterable[Document]:
+        """Return ungrouped documents the user has the requested permission on.
+
+        Only documents with ``room_id IS NULL`` are considered; access to
+        grouped documents is gated by the IAM provider via room policies.
+        """
+
+    @abstractmethod
+    async def list_documents_by_room(
+        self, *, tenant_id: str, room_id: str
+    ) -> Iterable[Document]:
+        """Return every document belonging to a room/group."""
+
+    @abstractmethod
+    async def save_document_group(self, group: DocumentGroup) -> None:
+        """Persist a new document group."""
+
+    @abstractmethod
+    async def get_document_group(
+        self, *, tenant_id: str, group_id: str
+    ) -> Optional[DocumentGroup]:
+        """Return a single document group by ID."""
+
+    @abstractmethod
+    async def list_document_groups_by_ids(
+        self, *, tenant_id: str, group_ids: Iterable[str]
+    ) -> Iterable[DocumentGroup]:
+        """Return the document groups whose IDs are in ``group_ids``."""
+
+    @abstractmethod
+    async def update_document_group(
+        self,
+        *,
+        tenant_id: str,
+        group_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Optional[DocumentGroup]:
+        """Patch a group's mutable metadata. Returns the updated group or None."""
+
+    @abstractmethod
+    async def delete_document_group(self, *, tenant_id: str, group_id: str) -> None:
+        """Delete a group. ``documents.room_id`` is nullified via FK cascade."""
+
+    @abstractmethod
+    async def update_document_room(
+        self, *, tenant_id: str, document_id: str, room_id: Optional[str]
+    ) -> Optional[Document]:
+        """Move a document to a group (room_id) or remove from group (room_id=None)."""

@@ -83,6 +83,39 @@ class Document(BaseModel):
     storage_key: str
     created_at: datetime
     created_by: str
+    room_id: Optional[str] = None  # NULL = ungrouped (uses document_permissions). Otherwise: IAM resource id (e.g. dcgrp_...).
+
+
+class DocumentGroup(BaseModel):
+    """A room/space that groups documents under a single IAM-managed resource.
+
+    The ``id`` field is the same opaque identifier registered as a resource
+    in the IAM provider, allowing JWT policy claims of the form
+    ``{"dcgrp_<id>": <bitmask>}`` to gate access to every document with a
+    matching ``room_id``.
+    """
+
+    id: str
+    tenant_id: str
+    name: str
+    description: Optional[str] = None
+    created_by: str
+    created_at: datetime
+
+
+class DocumentPermission(BaseModel):
+    """Instance-level permission grant for an ungrouped document.
+
+    Only used for documents whose ``room_id`` is ``None``. Grouped
+    documents inherit access from their parent room via the JWT.
+    """
+
+    document_id: str
+    tenant_id: str
+    user_id: str
+    permissions: int  # ResourceAction bitmask
+    granted_by: str
+    granted_at: datetime
 
 
 class ShareLink(BaseModel):

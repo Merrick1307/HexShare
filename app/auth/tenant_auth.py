@@ -10,8 +10,8 @@ introspection endpoints to validate access tokens.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Sequence, Callable, Optional
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Sequence, Callable, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -32,13 +32,16 @@ class TenantPrincipal:
     user_id: str
     token: Optional[str] = None
     roles: Sequence[str] | None = None
+    # IAM policy embedded in the access token: resource_id -> bitmask.
+    # Empty mapping when the token has no embedded policy (e.g. pure OIDC).
+    policy: Mapping[str, Any] = field(default_factory=dict)
 
 
 class TenantAuthDependency:
     """Factory for FastAPI dependency that authenticates tenant tokens."""
 
-    def __init__(self, authenticator: AuthenticatorPort = HEXIAMAuthenticator()) -> None:
-        self._token_port = authenticator
+    def __init__(self, authenticator: AuthenticatorPort | None = None) -> None:
+        self._token_port = authenticator or HEXIAMAuthenticator()
 
     def __call__(self) -> Callable:
         def verify(credentials: HTTPAuthorizationCredentials = Depends(_http_bearer), request: Request = None):
@@ -60,11 +63,18 @@ class TenantAuthDependency:
             except Exception:
                 raise HTTPException(status_code=401, detail="Invalid or expired token")
             tenant_id = payload.tenant_id
-            user_id = payload.subject or payload.user_id
+            user_id = payload.user_id or payload.subject
             if not tenant_id or not user_id:
                 raise HTTPException(status_code=401, detail="Token missing tenant or user claims")
             roles = payload.roles
-            return TenantPrincipal(tenant_id=tenant_id, user_id=user_id, roles=roles, token=token)
+            policy = payload.policy or {}
+            return TenantPrincipal(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                roles=roles,
+                token=token,
+                policy=policy,
+            )
         return verify
 
 

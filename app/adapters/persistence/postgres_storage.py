@@ -13,7 +13,14 @@ import asyncpg  # type: ignore
 from datetime import datetime
 from typing import Iterable, Optional
 
-from app.domain import Document, ShareLink, VisitorSession, ViewEvent
+from app.domain import (
+    Document,
+    DocumentGroup,
+    DocumentPermission,
+    ShareLink,
+    VisitorSession,
+    ViewEvent,
+)
 from app.infra.factories import StorageFactory
 from app.ports.storage_port import StoragePort
 
@@ -26,10 +33,24 @@ class PostgresStorage(StoragePort):
         import uuid
         return f"{prefix}_{uuid.uuid4().hex}"
 
+    @staticmethod
+    def _row_to_document(row) -> Document:
+        return Document(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            name=row["name"],
+            mime_type=row["mime_type"],
+            size=row["size"],
+            storage_key=row["storage_key"],
+            created_at=row["created_at"],
+            created_by=row["created_by"],
+            room_id=row["room_id"] if "room_id" in row.keys() else None,
+        )
+
     async def save_document(self, document: Document) -> None:
         sql = """
-        INSERT INTO documents (id, tenant_id, name, mime_type, size, storage_key, created_at, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO documents (id, tenant_id, name, mime_type, size, storage_key, created_at, created_by, room_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         """
         async with self._pool.acquire() as con:
             await con.execute(
@@ -42,51 +63,31 @@ class PostgresStorage(StoragePort):
                 document.storage_key,
                 document.created_at,
                 document.created_by,
+                document.room_id,
             )
 
     async def get_document(self, *, tenant_id: str, document_id: str) -> Optional[Document]:
         sql = """
-        SELECT id, tenant_id, name, mime_type, size, storage_key, created_at, created_by
+        SELECT id, tenant_id, name, mime_type, size, storage_key, created_at, created_by, room_id
         FROM documents
         WHERE tenant_id = $1 AND id = $2
         """
         async with self._pool.acquire() as con:
             row = await con.fetchrow(sql, tenant_id, document_id)
             if row:
-                return Document(
-                    id=row["id"],
-                    tenant_id=row["tenant_id"],
-                    name=row["name"],
-                    mime_type=row["mime_type"],
-                    size=row["size"],
-                    storage_key=row["storage_key"],
-                    created_at=row["created_at"],
-                    created_by=row["created_by"],
-                )
+                return self._row_to_document(row)
             return None
 
     async def list_documents(self, *, tenant_id: str) -> Iterable[Document]:
         sql = """
-        SELECT id, tenant_id, name, mime_type, size, storage_key, created_at, created_by
+        SELECT id, tenant_id, name, mime_type, size, storage_key, created_at, created_by, room_id
         FROM documents
         WHERE tenant_id = $1
         ORDER BY created_at DESC
         """
         async with self._pool.acquire() as con:
             rows = await con.fetch(sql, tenant_id)
-        return [
-            Document(
-                id=row["id"],
-                tenant_id=row["tenant_id"],
-                name=row["name"],
-                mime_type=row["mime_type"],
-                size=row["size"],
-                storage_key=row["storage_key"],
-                created_at=row["created_at"],
-                created_by=row["created_by"],
-            )
-            for row in rows
-        ]
+        return [self._row_to_document(row) for row in rows]
 
     async def save_share_link(self, link: ShareLink) -> None:
         sql = """
@@ -298,6 +299,202 @@ class PostgresStorage(StoragePort):
             )
             for row in rows
         ]
+
+
+    @staticmethod
+    def _row_to_permission(row) -> DocumentPermission:
+        return DocumentPermission(
+            document_id=row["document_id"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
+            permissions=int(row["permissions"]),
+            granted_by=row["granted_by"],
+            granted_at=row["granted_at"],
+        )
+
+    async def save_document_permission(self, permission: DocumentPermission) -> None:
+        sql = """
+        INSERT INTO document_permissions (
+            document_id, tenant_id, user_id, permissions, granted_by, granted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (document_id, user_id) DO UPDATE
+            SET permissions = EXCLUDED.permissions,
+                granted_by = EXCLUDED.granted_by,
+                granted_at = EXCLUDED.granted_at
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(
+                sql,
+                permission.document_id,
+                permission.tenant_id,
+                permission.user_id,
+                permission.permissions,
+                permission.granted_by,
+                permission.granted_at,
+            )
+
+    async def get_document_permission(
+        self, *, tenant_id: str, document_id: str, user_id: str
+    ) -> Optional[DocumentPermission]:
+        sql = """
+        SELECT document_id, tenant_id, user_id, permissions, granted_by, granted_at
+        FROM document_permissions
+        WHERE tenant_id = $1 AND document_id = $2 AND user_id = $3
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id, document_id, user_id)
+        return self._row_to_permission(row) if row else None
+
+    async def revoke_document_permission(
+        self, *, tenant_id: str, document_id: str, user_id: str
+    ) -> None:
+        sql = """
+        DELETE FROM document_permissions
+        WHERE tenant_id = $1 AND document_id = $2 AND user_id = $3
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(sql, tenant_id, document_id, user_id)
+
+    async def delete_document(self, *, tenant_id: str, document_id: str) -> None:
+        sql = "DELETE FROM documents WHERE tenant_id = $1 AND id = $2"
+        async with self._pool.acquire() as con:
+            await con.execute(sql, tenant_id, document_id)
+
+    async def list_document_permissions(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[DocumentPermission]:
+        sql = """
+        SELECT document_id, tenant_id, user_id, permissions, granted_by, granted_at
+        FROM document_permissions
+        WHERE tenant_id = $1 AND document_id = $2
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, document_id)
+        return [self._row_to_permission(r) for r in rows]
+
+    async def list_ungrouped_documents_by_permission(
+        self, *, tenant_id: str, user_id: str, required_permission: int
+    ) -> Iterable[Document]:
+        sql = """
+        SELECT d.id, d.tenant_id, d.name, d.mime_type, d.size, d.storage_key,
+               d.created_at, d.created_by, d.room_id
+        FROM documents d
+        JOIN document_permissions p
+          ON p.document_id = d.id AND p.tenant_id = d.tenant_id AND p.user_id = $2
+        WHERE d.tenant_id = $1
+          AND d.room_id IS NULL
+          AND (p.permissions & $3) <> 0
+        ORDER BY d.created_at DESC
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, user_id, int(required_permission))
+        return [self._row_to_document(row) for row in rows]
+
+    async def list_documents_by_room(
+        self, *, tenant_id: str, room_id: str
+    ) -> Iterable[Document]:
+        sql = """
+        SELECT id, tenant_id, name, mime_type, size, storage_key, created_at, created_by, room_id
+        FROM documents
+        WHERE tenant_id = $1 AND room_id = $2
+        ORDER BY created_at DESC
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, room_id)
+        return [self._row_to_document(row) for row in rows]
+
+
+    @staticmethod
+    def _row_to_group(row) -> DocumentGroup:
+        return DocumentGroup(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            name=row["name"],
+            description=row["description"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+        )
+
+    async def save_document_group(self, group: DocumentGroup) -> None:
+        sql = """
+        INSERT INTO document_groups (id, tenant_id, name, description, created_by, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(
+                sql,
+                group.id,
+                group.tenant_id,
+                group.name,
+                group.description,
+                group.created_by,
+                group.created_at,
+            )
+
+    async def get_document_group(
+        self, *, tenant_id: str, group_id: str
+    ) -> Optional[DocumentGroup]:
+        sql = """
+        SELECT id, tenant_id, name, description, created_by, created_at
+        FROM document_groups
+        WHERE tenant_id = $1 AND id = $2
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id, group_id)
+        return self._row_to_group(row) if row else None
+
+    async def list_document_groups_by_ids(
+        self, *, tenant_id: str, group_ids: Iterable[str]
+    ) -> Iterable[DocumentGroup]:
+        ids = list(group_ids)
+        if not ids:
+            return []
+        sql = """
+        SELECT id, tenant_id, name, description, created_by, created_at
+        FROM document_groups
+        WHERE tenant_id = $1 AND id = ANY($2::text[])
+        ORDER BY created_at DESC
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, ids)
+        return [self._row_to_group(row) for row in rows]
+
+    async def update_document_group(
+        self,
+        *,
+        tenant_id: str,
+        group_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Optional[DocumentGroup]:
+        sql = """
+        UPDATE document_groups
+        SET name = COALESCE($3, name),
+            description = COALESCE($4, description)
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, tenant_id, name, description, created_by, created_at
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id, group_id, name, description)
+        return self._row_to_group(row) if row else None
+
+    async def delete_document_group(self, *, tenant_id: str, group_id: str) -> None:
+        sql = "DELETE FROM document_groups WHERE tenant_id = $1 AND id = $2"
+        async with self._pool.acquire() as con:
+            await con.execute(sql, tenant_id, group_id)
+
+    async def update_document_room(
+        self, *, tenant_id: str, document_id: str, room_id: Optional[str]
+    ) -> Optional[Document]:
+        sql = """
+            UPDATE documents
+            SET room_id = $3
+            WHERE tenant_id = $1 AND id = $2
+            RETURNING *
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id, document_id, room_id)
+        return self._row_to_document(row) if row else None
 
 
 @StorageFactory.register("postgres")

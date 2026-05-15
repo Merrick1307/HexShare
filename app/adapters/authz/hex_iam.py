@@ -1,4 +1,4 @@
-from app.core.authz import HEXIAMAction
+from app.core.authz import ResourceAction
 from app.ports.authn import Principal
 from app.ports.authz import AuthorizerPort, AuthorizationError
 
@@ -16,10 +16,10 @@ class HexIAMAuthorizer(AuthorizerPort):
         bitmask = int(principal.policy.get(resource_id, 0) or 0)
         key = action.upper()
 
-        if key not in HEXIAMAction.__members__:
+        if key not in ResourceAction.__members__:
             raise AuthorizationError("unknown action")
 
-        required = HEXIAMAction[key].value
+        required = ResourceAction[key].value
         if not (bitmask & required):
             raise AuthorizationError("forbidden")
         return None

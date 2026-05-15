@@ -22,10 +22,18 @@ from app.auth.tenant_auth import TenantAuthDependency
 from app.infra.factories import (
     AccessControlFactory,
     AuthenticatorFactory,
+    IAMPolicyFactory,
     ObjectStorageFactory,
     StorageFactory,
 )
-from app.services import AnalyticsService, DocumentService, LinkService, UploadService, ViewerService
+from app.services import (
+    AnalyticsService,
+    DocumentGroupService,
+    DocumentService,
+    LinkService,
+    UploadService,
+    ViewerService,
+)
 
 
 @asynccontextmanager
@@ -36,6 +44,7 @@ async def lifespan(fastapi_app: FastAPI):
     preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
     preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
     preferred_object_storage = os.getenv("HEXSHARE_OBJECT_STORAGE", "cloudinary")
+    preferred_iam_policy = os.getenv("HEXSHARE_IAM_POLICY", "hexiam")
 
     import app.infra.bootstrap  # noqa: F401
 
@@ -44,6 +53,7 @@ async def lifespan(fastapi_app: FastAPI):
 
     persistence_layer = StorageFactory.create(preferred_storage, pool=dp_pool)
     object_storage = ObjectStorageFactory.create(preferred_object_storage)
+    iam_policy = IAMPolicyFactory.create(preferred_iam_policy)
 
     access_control = AccessControlFactory.create(
         preferred_access_control,
@@ -57,6 +67,7 @@ async def lifespan(fastapi_app: FastAPI):
     token_adapter = JWTTokenAdapter()
     event_bus = NoopEventBus()
     document_service = DocumentService(persistence_layer, event_bus)
+    document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
     upload_service = UploadService(
         metadata_storage=persistence_layer,
@@ -76,6 +87,8 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.token_adapter = token_adapter
     fastapi_app.state.event_bus = event_bus
     fastapi_app.state.document_service = document_service
+    fastapi_app.state.document_group_service = document_group_service
+    fastapi_app.state.iam_policy = iam_policy
     fastapi_app.state.upload_service = upload_service
     fastapi_app.state.link_service = link_service
     fastapi_app.state.viewer_service = viewer_service
@@ -104,9 +117,10 @@ def create_app(*args, **kwargs) -> FastAPI:
     app.include_router(auth_oidc_router, prefix="/api")
     app.include_router(user_router, prefix="/api/user")
 
+    frontend_url = os.getenv("HEXSHARE_FRONTEND_URL", "http://localhost:3000").rstrip("/")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[frontend_url, "http://localhost:3000", "http://localhost:3003"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

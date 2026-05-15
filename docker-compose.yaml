@@ -29,6 +29,17 @@ services:
       db:
         condition: service_healthy
 
+  hexshare-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.local
+    ports:
+      - "3000:3000"
+#      - "3000:5173"
+    environment:
+      - HEXSHARE_PUBLIC_URL=${HEXSHARE_PUBLIC_URL}
+      - HEXSHARE_FRONTEND_URL=${HEXSHARE_FRONTEND_URL}
+
   db:
     image: postgres:17-alpine
     environment:

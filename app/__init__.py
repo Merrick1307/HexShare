@@ -20,8 +20,12 @@ Poetry environment as requested.
 """
 
 from app.main import create_app  # noqa: E402,F401
-from app.adapters import *
+
+try:
+    from app.adapters import *  # noqa: F403
+except ImportError:
+    pass
+
 __all__ = [
     "create_app",
-
 ]

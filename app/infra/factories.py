@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict
 from app.ports import ObjectStoragePort, StoragePort
 from app.ports.access_control import AccessControlPort
 from app.ports.authn import AuthenticatorPort
+from app.ports.iam_policy import IAMPolicyPort
 from app.ports.oidc_client import OIDCClientPort
 
 
@@ -78,6 +79,24 @@ class OIDCClientFactory:
             return cls._registry[name](**kwargs)
         except KeyError as exc:
             raise ValueError(f"Unknown OIDC client: {name}") from exc
+
+
+class IAMPolicyFactory:
+    _registry: Dict[str, Callable[..., IAMPolicyPort]] = {}
+
+    @classmethod
+    def register(cls, name: str):
+        def deco(builder: Callable[..., IAMPolicyPort]):
+            cls._registry[name] = builder
+            return builder
+        return deco
+
+    @classmethod
+    def create(cls, name: str, **kwargs: Any) -> IAMPolicyPort:
+        try:
+            return cls._registry[name](**kwargs)
+        except KeyError as exc:
+            raise ValueError(f"Unknown IAM policy adapter: {name}") from exc
 
 
 class StorageFactory:

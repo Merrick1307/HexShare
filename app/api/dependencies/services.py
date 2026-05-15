@@ -5,6 +5,10 @@ def get_document_service(request: Request):
     return request.app.state.document_service
 
 
+def get_document_group_service(request: Request):
+    return request.app.state.document_group_service
+
+
 def get_link_service(request: Request):
     return request.app.state.link_service
 
@@ -39,3 +43,7 @@ def get_share_auth(request: Request):
 
 def get_oidc_client_service(request: Request):
     return request.app.state.oidc_client_service
+
+
+def get_iam_policy(request: Request):
+    return request.app.state.iam_policy

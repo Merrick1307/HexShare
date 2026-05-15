@@ -6,9 +6,14 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Optional
 
-import boto3
-from botocore.config import Config
-from botocore.exceptions import ClientError
+try:
+    import boto3
+    from botocore.config import Config
+    from botocore.exceptions import ClientError
+except ImportError:
+    boto3 = None  # type: ignore
+    Config = None  # type: ignore
+    ClientError = None  # type: ignore
 
 from app.infra.factories import ObjectStorageFactory
 from app.ports.object_storage_port import ObjectInfo, ObjectStoragePort, PresignedUpload

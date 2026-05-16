@@ -16,7 +16,12 @@ except ImportError:
     ClientError = None  # type: ignore
 
 from app.infra.factories import ObjectStorageFactory
-from app.ports.object_storage_port import ObjectInfo, ObjectStoragePort, PresignedUpload
+from app.ports.object_storage_port import (
+    ObjectDescriptor,
+    ObjectStoragePort,
+    ObjectWriteRequest,
+    TemporaryObjectAccess,
+)
 
 
 _FILENAME_SANITIZER = re.compile(r"[^A-Za-z0-9._-]+")
@@ -36,6 +41,9 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
         force_path_style: bool = False,
         signature_version: str = "s3v4",
     ) -> None:
+        if boto3 is None or Config is None:
+            raise RuntimeError("boto3 is required to use S3 object storage")
+
         self.bucket = bucket
         self.region_name = region_name
         self.endpoint_url = endpoint_url
@@ -68,13 +76,42 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
         parts = [part for part in (self.prefix, "tenants", tenant_id, "documents", document_id, safe_name) if part]
         return "/".join(parts)
 
-    async def create_presigned_upload(
+    async def read_object(self, *, object_key: str) -> bytes:
+        def _read() -> bytes:
+            response = self._client.get_object(Bucket=self.bucket, Key=object_key)
+            body = response["Body"]
+            try:
+                return body.read()
+            finally:
+                body.close()
+
+        return await asyncio.to_thread(_read)
+
+    async def write_object(self, request: ObjectWriteRequest) -> ObjectDescriptor:
+        def _write() -> ObjectDescriptor:
+            self._client.put_object(
+                Bucket=self.bucket,
+                Key=request.object_key,
+                Body=request.content,
+                ContentType=request.content_type,
+                Metadata=dict(request.metadata or {}),
+            )
+            return ObjectDescriptor(
+                object_key=request.object_key,
+                size=len(request.content),
+                content_type=request.content_type,
+                metadata=dict(request.metadata or {}),
+            )
+
+        return await asyncio.to_thread(_write)
+
+    async def create_temporary_upload(
         self,
         *,
         object_key: str,
         content_type: str,
         expires_in: int = 900,
-    ) -> PresignedUpload:
+    ) -> TemporaryObjectAccess:
         def _generate() -> str:
             return self._client.generate_presigned_url(
                 ClientMethod="put_object",
@@ -88,7 +125,7 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
             )
 
         url = await asyncio.to_thread(_generate)
-        return PresignedUpload(
+        return TemporaryObjectAccess(
             object_key=object_key,
             url=url,
             method="PUT",
@@ -96,13 +133,13 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
             expires_in=expires_in,
         )
 
-    async def create_presigned_download(
+    async def create_temporary_download(
         self,
         *,
         object_key: str,
         expires_in: int = 900,
         filename: Optional[str] = None,
-    ) -> str:
+    ) -> TemporaryObjectAccess:
         def _generate() -> str:
             params: dict[str, Any] = {
                 "Bucket": self.bucket,
@@ -117,10 +154,15 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
                 HttpMethod="GET",
             )
 
-        return await asyncio.to_thread(_generate)
+        return TemporaryObjectAccess(
+            object_key=object_key,
+            url=await asyncio.to_thread(_generate),
+            method="GET",
+            expires_in=expires_in,
+        )
 
-    async def head_object(self, *, object_key: str) -> ObjectInfo | None:
-        def _head() -> ObjectInfo | None:
+    async def head_object(self, *, object_key: str) -> ObjectDescriptor | None:
+        def _head() -> ObjectDescriptor | None:
             try:
                 resp = self._client.head_object(Bucket=self.bucket, Key=object_key)
             except ClientError as exc:
@@ -129,7 +171,7 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
                 if status == 404 or code in {"404", "NoSuchKey", "NotFound"}:
                     return None
                 raise
-            return ObjectInfo(
+            return ObjectDescriptor(
                 object_key=object_key,
                 size=resp.get("ContentLength"),
                 etag=(resp.get("ETag") or "").strip('"') or None,

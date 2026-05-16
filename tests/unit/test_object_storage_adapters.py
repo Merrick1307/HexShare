@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -35,7 +36,8 @@ def fake_s3_client(monkeypatch) -> FakeS3Client:
 
     import app.adapters.object_storage.s3 as s3_module
 
-    monkeypatch.setattr(s3_module.boto3, "client", lambda *args, **kwargs: client)
+    monkeypatch.setattr(s3_module, "boto3", SimpleNamespace(client=lambda *args, **kwargs: client))
+    monkeypatch.setattr(s3_module, "Config", lambda **kwargs: kwargs)
     return client
 
 
@@ -56,7 +58,7 @@ async def test_s3_adapter_builds_sanitized_object_key(fake_s3_client):
 async def test_s3_adapter_returns_presigned_upload(fake_s3_client):
     adapter = S3ObjectStorageAdapter(bucket="hexshare-docs", prefix="uploads")
 
-    upload = await adapter.create_presigned_upload(
+    upload = await adapter.create_temporary_upload(
         object_key="uploads/tenants/t1/documents/d1/report.pdf",
         content_type="application/pdf",
         expires_in=300,

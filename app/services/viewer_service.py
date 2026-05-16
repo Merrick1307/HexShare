@@ -3,9 +3,6 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncIterator
-
-import httpx
 
 from app.domain import EventType, VisitorSession, ViewEvent
 from app.ports.object_storage_port import ObjectStoragePort
@@ -30,6 +27,13 @@ class ResolvedViewSession:
     email: str | None
     revoked: bool = False
     expired: bool = False
+
+
+@dataclass(frozen=True)
+class StreamedDocument:
+    content: bytes
+    media_type: str
+    filename: str
 
 
 class ViewerService:
@@ -236,28 +240,22 @@ class ViewerService:
             )
         )
 
-    async def get_signed_inline_url(self, *, tenant_id: str, session_id: str) -> tuple[ResolvedViewSession, str]:
-        resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
-        url = await self._object_storage.create_presigned_download(
-            object_key=resolved.storage_key,
-            expires_in=120,
-            filename=None,
-        )
-        return resolved, url
-
-    async def get_signed_download_url(self, *, tenant_id: str, session_id: str) -> tuple[ResolvedViewSession, str]:
-        resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
-        url = await self._object_storage.create_presigned_download(
-            object_key=resolved.storage_key,
-            expires_in=120,
+    async def _read_streamed_document(self, *, resolved: ResolvedViewSession) -> StreamedDocument:
+        content = await self._object_storage.read_object(object_key=resolved.storage_key)
+        return StreamedDocument(
+            content=content,
+            media_type=resolved.mime_type or "application/octet-stream",
             filename=resolved.document_name,
         )
-        return resolved, url
 
-    async def stream_via_signed_url(self, *, url: str) -> AsyncIterator[bytes]:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
-            async with client.stream("GET", url) as response:
-                response.raise_for_status()
-                async for chunk in response.aiter_bytes():
-                    if chunk:
-                        yield chunk
+    async def stream_document(self, *, session_id: str) -> StreamedDocument:
+        resolved = await self.resolve_view_session(session_id=session_id)
+        active = await self.ensure_active_session(
+            tenant_id=resolved.session.tenant_id,
+            session_id=session_id,
+        )
+        return await self._read_streamed_document(resolved=active)
+
+    async def download_document(self, *, tenant_id: str, session_id: str) -> StreamedDocument:
+        resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
+        return await self._read_streamed_document(resolved=resolved)

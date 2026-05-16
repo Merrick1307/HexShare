@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.api.dependencies.services import (
     get_analytics_service,
@@ -40,6 +40,20 @@ from app.services import (
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def _stream_bytes(content: bytes):
+    yield content
+
+
+def _apply_viewer_headers(response: StreamingResponse, *, filename: str, disposition: str) -> StreamingResponse:
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Robots-Tag"] = "noindex, noarchive, nosnippet"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+    return response
 
 
 def _serialize_link(link: ShareLink, token: str) -> ShareLinkResponse:
@@ -139,7 +153,12 @@ def api_router() -> APIRouter:
         except ValueError:
             raise HTTPException(status_code=404, detail="Document not found")
 
-    @router.delete("/documents/{document_id}", status_code=204)
+    @router.delete(
+        "/documents/{document_id}",
+        status_code=204,
+        response_class=Response,
+        response_model=None,
+    )
     async def delete_document(
         document_id: str,
         principal: TenantPrincipal = Depends(get_tenant_auth()),
@@ -337,7 +356,12 @@ def api_router() -> APIRouter:
         except ValueError:
             raise HTTPException(status_code=404, detail="Group not found")
 
-    @router.delete("/document-groups/{group_id}", status_code=204)
+    @router.delete(
+        "/document-groups/{group_id}",
+        status_code=204,
+        response_class=Response,
+        response_model=None,
+    )
     async def delete_document_group(
         group_id: str,
         principal: TenantPrincipal = Depends(get_tenant_auth()),
@@ -417,7 +441,12 @@ def api_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Group not found")
         return {"status": "ok", "user_id": user_id, "role": role}
 
-    @router.delete("/document-groups/{group_id}/members/{user_id}", status_code=204)
+    @router.delete(
+        "/document-groups/{group_id}/members/{user_id}",
+        status_code=204,
+        response_class=Response,
+        response_model=None,
+    )
     async def remove_group_member(
         group_id: str,
         user_id: str,
@@ -557,16 +586,7 @@ def api_router() -> APIRouter:
         viewer_service: ViewerService = Depends(get_viewer_service),
     ) -> StreamingResponse:
         try:
-            resolved = await viewer_service.resolve_view_session(session_id=session_id)
-            active = await viewer_service.ensure_active_session(
-                tenant_id=resolved.session.tenant_id,
-                session_id=session_id,
-            )
-            signed_url_pair = await viewer_service.get_signed_inline_url(
-                tenant_id=active.session.tenant_id,
-                session_id=session_id,
-            )
-            _, signed_url = signed_url_pair
+            streamed = await viewer_service.stream_document(session_id=session_id)
         except ValueError as exc:
             detail = str(exc)
             status_code = 404
@@ -577,15 +597,14 @@ def api_router() -> APIRouter:
             raise HTTPException(status_code=status_code, detail=detail)
 
         response = StreamingResponse(
-            viewer_service.stream_via_signed_url(url=signed_url),
-            media_type=active.mime_type or "application/octet-stream",
+            _stream_bytes(streamed.content),
+            media_type=streamed.media_type,
         )
-        response.headers["Cache-Control"] = "private, no-store, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Robots-Tag"] = "noindex, noarchive, nosnippet"
-        response.headers["Content-Disposition"] = f'inline; filename="{active.document_name}"'
-        return response
+        return _apply_viewer_headers(
+            response,
+            filename=streamed.filename,
+            disposition="inline",
+        )
 
     @router.get("/view-sessions/{session_id}/download")
     async def download_view_content(
@@ -610,7 +629,7 @@ def api_router() -> APIRouter:
                 session_id=session_id,
                 blocked=False,
             )
-            _, signed_url = await viewer_service.get_signed_download_url(
+            streamed = await viewer_service.download_document(
                 tenant_id=active.session.tenant_id,
                 session_id=session_id,
             )
@@ -626,14 +645,14 @@ def api_router() -> APIRouter:
             raise HTTPException(status_code=status_code, detail=detail)
 
         response = StreamingResponse(
-            viewer_service.stream_via_signed_url(url=signed_url),
-            media_type=active.mime_type or "application/octet-stream",
+            _stream_bytes(streamed.content),
+            media_type=streamed.media_type,
         )
-        response.headers["Cache-Control"] = "private, no-store, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Content-Disposition"] = f'attachment; filename="{active.document_name}"'
-        return response
+        return _apply_viewer_headers(
+            response,
+            filename=streamed.filename,
+            disposition="attachment",
+        )
 
     @router.post("/view-sessions/{session_id}/heartbeat")
     async def viewer_heartbeat(

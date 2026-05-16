@@ -1,9 +1,42 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from app.adapters.object_storage.cloudinary import CloudinaryObjectStorageAdapter
+import app.adapters.object_storage.cloudinary_adapter as cloudinary_module
+from app.adapters.object_storage.cloudinary_adapter import CloudinaryObjectStorageAdapter
 from app.ports.object_storage_port import ObjectInfo
+
+
+@pytest.fixture(autouse=True)
+def fake_cloudinary_sdk(monkeypatch):
+    monkeypatch.setattr(
+        cloudinary_module,
+        "cloudinary",
+        SimpleNamespace(config=lambda **kwargs: kwargs),
+    )
+    monkeypatch.setattr(
+        cloudinary_module,
+        "cloudinary_utils",
+        SimpleNamespace(
+            api_sign_request=lambda params, secret: "signed123",
+            private_download_url=lambda *args, **kwargs: "https://download.test/file.pdf",
+        ),
+    )
+    monkeypatch.setattr(
+        cloudinary_module,
+        "cloudinary_api",
+        SimpleNamespace(resource=lambda *args, **kwargs: {}),
+    )
+    monkeypatch.setattr(
+        cloudinary_module,
+        "cloudinary_uploader",
+        SimpleNamespace(
+            upload=lambda *args, **kwargs: {"bytes": 0, "etag": None},
+            destroy=lambda *args, **kwargs: {"result": "ok"},
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -26,11 +59,6 @@ async def test_build_object_key_keeps_extension_for_raw_assets():
 
 @pytest.mark.asyncio
 async def test_create_presigned_upload_returns_signed_form(monkeypatch):
-    monkeypatch.setattr(
-        "app.adapters.object_storage.cloudinary.cloudinary_utils.api_sign_request",
-        lambda params, secret: "signed123",
-    )
-
     adapter = CloudinaryObjectStorageAdapter(
         cloud_name="demo",
         api_key="key123",
@@ -38,7 +66,7 @@ async def test_create_presigned_upload_returns_signed_form(monkeypatch):
         prefix="documents",
     )
 
-    upload = await adapter.create_presigned_upload(
+    upload = await adapter.create_temporary_upload(
         object_key="documents/tenants/t1/documents/d1/file.pdf",
         content_type="application/pdf",
         expires_in=600,
@@ -55,7 +83,8 @@ async def test_create_presigned_upload_returns_signed_form(monkeypatch):
 @pytest.mark.asyncio
 async def test_head_object_maps_cloudinary_resource(monkeypatch):
     monkeypatch.setattr(
-        "app.adapters.object_storage.cloudinary.cloudinary_api.resource",
+        cloudinary_module.cloudinary_api,
+        "resource",
         lambda *args, **kwargs: {
             "public_id": "documents/tenants/t1/documents/d1/file.pdf",
             "bytes": 12345,
@@ -93,7 +122,8 @@ async def test_delete_object_calls_destroy(monkeypatch):
         return {"result": "ok"}
 
     monkeypatch.setattr(
-        "app.adapters.object_storage.cloudinary.cloudinary_uploader.destroy",
+        cloudinary_module.cloudinary_uploader,
+        "destroy",
         fake_destroy,
     )
 

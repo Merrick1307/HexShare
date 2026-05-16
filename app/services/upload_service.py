@@ -12,7 +12,7 @@ import asyncio
 from dataclasses import dataclass
 
 from app.domain import Document
-from app.ports.object_storage_port import ObjectStoragePort, PresignedUpload
+from app.ports.object_storage_port import ObjectStoragePort, TemporaryObjectAccess
 from app.ports.storage_port import StoragePort
 from app.services.document_service import DocumentService
 
@@ -21,7 +21,7 @@ from app.services.document_service import DocumentService
 class UploadInitiation:
     document_id: str
     object_key: str
-    upload: PresignedUpload
+    upload: TemporaryObjectAccess
 
 
 class UploadService:
@@ -51,7 +51,7 @@ class UploadService:
             document_id=document_id,
             filename=filename,
         )
-        upload = await self._object_storage.create_presigned_upload(
+        upload = await self._object_storage.create_temporary_upload(
             object_key=object_key,
             content_type=content_type,
             expires_in=expires_in,
@@ -122,8 +122,9 @@ class UploadService:
         if not document:
             raise ValueError("document_not_found")
 
-        return await self._object_storage.create_presigned_download(
+        access = await self._object_storage.create_temporary_download(
             object_key=document.storage_key,
             expires_in=expires_in,
             filename=filename or document.name,
         )
+        return access.url

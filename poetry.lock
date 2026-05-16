@@ -751,6 +751,27 @@ files = [
 ]
 
 [[package]]
+name = "pdf-oxide"
+version = "0.3.49"
+description = "The fastest Python PDF library: 0.8ms mean, 5× faster than PyMuPDF. Text extraction, markdown conversion, PDF creation. 100% pass rate on 3,830 PDFs."
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "pdf_oxide-0.3.49-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:5a513550163ecbe2d4de04eadd3c7674f2fd93244c49f1b9467501e6cf07f2c9"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:34355c4d32bdf20a6080ee51d1f70db504c46e9da68af01173d5d3b1964d3d03"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:4a5ed0da0421f3d84573bd7d25b002578ed5a74027a8249cf1899b06b3d0347c"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:b91384a43305124a18528ea7128857e93227886493520b587bbe05d4f7b2096a"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:7dc4f7b7e6eacab603ccdb50e29a0e57ff91d8fa7c8a7126ab9c91f68023678c"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:7398b960d4dc1615a24a827e86a55a106ad2f9729def84361b853d44e3a1a7b5"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-win_amd64.whl", hash = "sha256:8b885b397a973ab193bc9258a4a25c1e059643a03cc427ed8685b0e36e83f971"},
+    {file = "pdf_oxide-0.3.49-cp38-abi3-win_arm64.whl", hash = "sha256:50f80bd518d70c5a083846026cd411675de31a4653d017aa2af5ab9067fc9796"},
+    {file = "pdf_oxide-0.3.49.tar.gz", hash = "sha256:6e2d59479f6005d1f49673a87d862d637275e059f162b99644ad055735c877ab"},
+]
+
+[package.extras]
+ocr = ["onnxruntime (>=1.20.1)"]
+
+[[package]]
 name = "psycopg2-binary"
 version = "2.9.11"
 description = "psycopg2 - Python-PostgreSQL Database Adapter"
@@ -1701,4 +1722,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.14"
-content-hash = "d68ee6138bcb6cc92f366311f08c6702c8b04db7ee10de105855e26152420e9d"
+content-hash = "e31a6e8e57ed947db61169970f4f08e2144664122c8f174c7b23a0ec84488553"

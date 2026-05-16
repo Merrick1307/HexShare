@@ -7,6 +7,12 @@ from datetime import datetime, timezone
 from app.domain import EventType, VisitorSession, ViewEvent
 from app.ports.object_storage_port import ObjectStoragePort
 from app.ports.storage_port import StoragePort
+from app.services.document_processor import (
+    DocumentProcessor,
+    ProcessedDocument,
+    ProcessingContext,
+    ViewPolicy,
+)
 from app.services.document_service import DocumentService
 from app.services.link_service import LinkService
 
@@ -30,10 +36,9 @@ class ResolvedViewSession:
 
 
 @dataclass(frozen=True)
-class StreamedDocument:
-    content: bytes
-    media_type: str
-    filename: str
+class ViewSessionDelivery:
+    resolved: ResolvedViewSession
+    view_policy: ViewPolicy
 
 
 class ViewerService:
@@ -42,11 +47,13 @@ class ViewerService:
         *,
         storage: StoragePort,
         object_storage: ObjectStoragePort,
+        document_processor: DocumentProcessor,
         document_service: DocumentService,
         link_service: LinkService,
     ) -> None:
         self._storage = storage
         self._object_storage = object_storage
+        self._document_processor = document_processor
         self._document_service = document_service
         self._link_service = link_service
 
@@ -59,6 +66,11 @@ class ViewerService:
         if not value:
             return None
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _build_watermark_text(*, resolved: ResolvedViewSession) -> str:
+        identifier = resolved.email or resolved.link_id
+        return f"HexShare - {identifier}"
 
     async def inspect_share_token(self, *, tenant_id: str, document_id: str, link_id: str) -> dict:
         link = await self._link_service.get_share_link(tenant_id=tenant_id, link_id=link_id)
@@ -176,6 +188,16 @@ class ViewerService:
     async def resolve_view_session_any_tenant(self, *, session_id: str) -> ResolvedViewSession:
         return await self.resolve_view_session(session_id=session_id)
 
+    async def describe_view_session_delivery(self, *, tenant_id: str, session_id: str) -> ViewSessionDelivery:
+        resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
+        return ViewSessionDelivery(
+            resolved=resolved,
+            view_policy=self._document_processor.describe_view_policy(
+                filename=resolved.document_name,
+                source_media_type=resolved.mime_type,
+            ),
+        )
+
     async def ensure_active_session(self, *, tenant_id: str, session_id: str) -> ResolvedViewSession:
         resolved = await self.resolve_view_session_for_tenant(tenant_id=tenant_id, session_id=session_id)
         if resolved.session.ended_at is not None:
@@ -240,22 +262,48 @@ class ViewerService:
             )
         )
 
-    async def _read_streamed_document(self, *, resolved: ResolvedViewSession) -> StreamedDocument:
+    async def _process_document(
+        self,
+        *,
+        resolved: ResolvedViewSession,
+        session_id: str,
+        download: bool,
+    ) -> ProcessedDocument:
         content = await self._object_storage.read_object(object_key=resolved.storage_key)
-        return StreamedDocument(
-            content=content,
-            media_type=resolved.mime_type or "application/octet-stream",
+        context = ProcessingContext(
+            document_id=resolved.document_id,
+            session_id=session_id,
             filename=resolved.document_name,
+            source_media_type=resolved.mime_type or "application/octet-stream",
+            watermark_text=self._build_watermark_text(resolved=resolved),
+            download=download,
+        )
+        if download:
+            return await self._document_processor.process_for_download(
+                context=context,
+                content=content,
+            )
+        return await self._document_processor.process_for_view(
+            context=context,
+            content=content,
         )
 
-    async def stream_document(self, *, session_id: str) -> StreamedDocument:
+    async def stream_document(self, *, session_id: str) -> ProcessedDocument:
         resolved = await self.resolve_view_session(session_id=session_id)
         active = await self.ensure_active_session(
             tenant_id=resolved.session.tenant_id,
             session_id=session_id,
         )
-        return await self._read_streamed_document(resolved=active)
+        return await self._process_document(
+            resolved=active,
+            session_id=session_id,
+            download=False,
+        )
 
-    async def download_document(self, *, tenant_id: str, session_id: str) -> StreamedDocument:
+    async def download_document(self, *, tenant_id: str, session_id: str) -> ProcessedDocument:
         resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
-        return await self._read_streamed_document(resolved=resolved)
+        return await self._process_document(
+            resolved=resolved,
+            session_id=session_id,
+            download=True,
+        )

@@ -28,6 +28,7 @@ from app.infra.factories import (
 )
 from app.services import (
     AnalyticsService,
+    DocumentProcessor,
     DocumentGroupService,
     DocumentService,
     LinkService,
@@ -70,6 +71,7 @@ async def lifespan(fastapi_app: FastAPI):
     document_service = DocumentService(persistence_layer, event_bus)
     document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
+    document_processor = DocumentProcessor()
     upload_service = UploadService(
         metadata_storage=persistence_layer,
         object_storage=object_storage,
@@ -78,6 +80,7 @@ async def lifespan(fastapi_app: FastAPI):
     viewer_service = ViewerService(
         storage=persistence_layer,
         object_storage=object_storage,
+        document_processor=document_processor,
         document_service=document_service,
         link_service=link_service,
     )
@@ -89,6 +92,7 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.event_bus = event_bus
     fastapi_app.state.document_service = document_service
     fastapi_app.state.document_group_service = document_group_service
+    fastapi_app.state.document_processor = document_processor
     fastapi_app.state.iam_policy = iam_policy
     fastapi_app.state.upload_service = upload_service
     fastapi_app.state.link_service = link_service

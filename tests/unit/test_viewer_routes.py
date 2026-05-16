@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.router import api_router
-from app.services.viewer_service import StreamedDocument
+from app.services.document_processor import DocumentProcessingError, ProcessedDocument
 
 
 @dataclass
@@ -26,11 +26,12 @@ class _ViewerServiceStub:
     def __init__(self) -> None:
         self.download_attempts: list[tuple[str, str, bool]] = []
 
-    async def stream_document(self, *, session_id: str) -> StreamedDocument:
-        return StreamedDocument(
+    async def stream_document(self, *, session_id: str) -> ProcessedDocument:
+        return ProcessedDocument(
             content=b"viewer-bytes",
             media_type="application/pdf",
             filename="report.pdf",
+            source_media_type="application/pdf",
         )
 
     async def resolve_view_session(self, *, session_id: str) -> _ResolvedSession:
@@ -42,11 +43,12 @@ class _ViewerServiceStub:
     async def record_download_attempt(self, *, tenant_id: str, session_id: str, blocked: bool = False) -> None:
         self.download_attempts.append((tenant_id, session_id, blocked))
 
-    async def download_document(self, *, tenant_id: str, session_id: str) -> StreamedDocument:
-        return StreamedDocument(
+    async def download_document(self, *, tenant_id: str, session_id: str) -> ProcessedDocument:
+        return ProcessedDocument(
             content=b"download-bytes",
             media_type="application/pdf",
             filename="report.pdf",
+            source_media_type="application/pdf",
         )
 
 
@@ -101,3 +103,18 @@ def test_download_route_blocks_when_download_disabled():
     assert response.status_code == 403
     assert response.json()["detail"] == "Downloads are disabled for this share link"
     assert service.download_attempts == [("tenant-1", "session-1", True)]
+
+
+def test_view_content_returns_415_for_unsupported_inline_format():
+    service = _ViewerServiceStub()
+
+    async def unsupported_stream(*, session_id: str) -> ProcessedDocument:
+        raise DocumentProcessingError("inline_view_not_supported")
+
+    service.stream_document = unsupported_stream  # type: ignore[method-assign]
+    client = _make_client(service)
+
+    response = client.get("/api/v1/view-sessions/session-1/content")
+
+    assert response.status_code == 415
+    assert response.json()["detail"] == "inline_view_not_supported"

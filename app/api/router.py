@@ -33,6 +33,7 @@ from app.services import (
     AnalyticsService,
     DocumentGroupService,
     DocumentService,
+    DocumentProcessingError,
     LinkService,
     ViewerService,
 )
@@ -544,7 +545,7 @@ def api_router() -> APIRouter:
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )
-            resolved = await viewer_service.ensure_active_session(
+            delivery = await viewer_service.describe_view_session_delivery(
                 tenant_id=claims.tenant_id,
                 session_id=session.id,
             )
@@ -565,19 +566,22 @@ def api_router() -> APIRouter:
             session_id=session.id,
             tenant_id=claims.tenant_id,
             document_id=claims.document_id,
-            document_name=resolved.document_name,
-            mime_type=resolved.mime_type,
-            size=resolved.size,
+            document_name=delivery.resolved.document_name,
+            mime_type=delivery.resolved.mime_type,
+            size=delivery.resolved.size,
             link_id=claims.link_id,
             permissions=claims.permissions,
             content_path=f"/api/v1/view-sessions/{session.id}/content",
             download_path=(
                 f"/api/v1/view-sessions/{session.id}/download"
-                if resolved.can_download
+                if delivery.resolved.can_download
                 else None
             ),
             events_path=f"/api/v1/view-sessions/{session.id}/events",
             watermark_text=f"HexShare • {watermark}",
+            inline_view_supported=delivery.view_policy.inline_view_supported,
+            view_kind=delivery.view_policy.view_kind,
+            view_reason=delivery.view_policy.reason,
         )
 
     @router.get("/view-sessions/{session_id}/content")
@@ -594,6 +598,10 @@ def api_router() -> APIRouter:
                 status_code = 403
             elif detail == "expired":
                 status_code = 410
+            raise HTTPException(status_code=status_code, detail=detail)
+        except DocumentProcessingError as exc:
+            detail = str(exc)
+            status_code = 415 if detail == "inline_view_not_supported" else 422
             raise HTTPException(status_code=status_code, detail=detail)
 
         response = StreamingResponse(

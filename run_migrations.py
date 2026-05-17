@@ -140,13 +140,14 @@ def init_backend_and_migrations(db_url: str, migrations_path: Path):
 
 
 def apply_migrations(backend, migrations) -> int:
-    pending = list(backend.to_apply(migrations))
-    if not pending:
+    pending = backend.to_apply(migrations)
+    pending_list = list(pending)
+    if not pending_list:
         print("No pending migrations.")
         return 0
 
-    print(f"Applying {len(pending)} migration(s):")
-    for migration in pending:
+    print(f"Applying {len(pending_list)} migration(s):")
+    for migration in pending_list:
         print(f"  -> {migration.id}")
 
     with backend.lock():
@@ -160,12 +161,13 @@ def rollback_migrations(backend, migrations, count: int) -> int:
     if count < 1:
         raise RuntimeError("--count must be at least 1")
 
-    applied = list(backend.to_rollback(migrations))
-    if not applied:
+    applied = backend.to_rollback(migrations)
+    applied_list = list(applied)
+    if not applied_list:
         print("No applied migrations to roll back.")
         return 0
 
-    to_rollback = applied[:count]
+    to_rollback = applied_list[:count]
 
     print(f"Rolling back {len(to_rollback)} migration(s):")
     for migration in to_rollback:

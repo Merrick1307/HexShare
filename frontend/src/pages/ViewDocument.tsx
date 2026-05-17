@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
 import { Download, FileText, Lock, Printer } from 'lucide-react';
 import { api } from '../services/api';
 import { ShareInspection, ViewSession } from '../types';
@@ -13,39 +12,103 @@ type ViewerStatus = 'active' | 'revoked' | 'expired' | 'closed' | 'not_found';
 
 type PreviewState =
   | { kind: 'idle' | 'loading' }
-  | { kind: 'pdf' | 'image'; src: string }
+  | { kind: 'pdf_pages'; pageCount: number; pathTemplate: string }
+  | { kind: 'image'; src: string; alt: string }
   | { kind: 'html'; html: string }
-  | { kind: 'text'; text: string }
   | { kind: 'unsupported'; message: string };
 
-function getFileExtension(name: string) {
-  const parts = name.toLowerCase().split('.');
-  return parts.length > 1 ? parts.pop() || '' : '';
+function getInlineUnsupportedMessage(session: ViewSession) {
+  if (session.view_kind === 'docx') {
+    return 'This Word document is not available for inline viewing yet. Download remains available only when the share link explicitly allows it.';
+  }
+  if (session.view_reason === 'inline_view_not_supported') {
+    return 'This file type is not available for inline viewing in the secure viewer. Download remains available only when the share link explicitly allows it.';
+  }
+  if (session.view_reason === 'inline_view_backend_unavailable') {
+    return 'The secure viewer backend for this document type is currently unavailable.';
+  }
+  return 'Preview is not available for this file type in the secure viewer.';
 }
 
-function getPreviewKind(mimeType: string, fileName: string) {
-  const normalizedMime = (mimeType || '').toLowerCase();
-  const extension = getFileExtension(fileName);
+function buildPdfRenderWidth() {
+  const viewportWidth = Math.max(window.innerWidth - 96, 400);
+  const scaled = Math.round(viewportWidth * Math.max(window.devicePixelRatio || 1, 1));
+  return Math.max(400, Math.min(scaled, 2200));
+}
 
-  if (normalizedMime === 'application/pdf' || extension === 'pdf') return 'pdf';
-  if (normalizedMime.startsWith('image/')) return 'image';
-  if (normalizedMime.includes('markdown') || extension === 'md' || extension === 'markdown') return 'markdown';
-  if (
-    normalizedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    extension === 'docx'
-  ) {
-    return 'docx';
-  }
-  if (
-    normalizedMime.startsWith('text/') ||
-    normalizedMime === 'application/json' ||
-    normalizedMime === 'application/xml' ||
-    normalizedMime === 'text/csv' ||
-    ['txt', 'log', 'csv', 'json', 'xml', 'yaml', 'yml'].includes(extension)
-  ) {
-    return 'text';
-  }
-  return 'unsupported';
+function buildPdfPageUrl(pathTemplate: string, pageNumber: number, renderWidth: number) {
+  const pagePath = pathTemplate.replace('{page}', String(pageNumber));
+  const absolute = api.toAbsoluteApiUrl(pagePath);
+  return `${absolute}?width=${renderWidth}`;
+}
+
+function preloadPdfPageImage(pathTemplate: string, pageNumber: number, renderWidth: number) {
+  const image = new Image();
+  image.src = buildPdfPageUrl(pathTemplate, pageNumber, renderWidth);
+  return image;
+}
+
+function buildViewerContentUrl(path: string) {
+  return api.toAbsoluteApiUrl(path);
+}
+
+function PdfPagePlaceholder() {
+  return <div className="h-full w-full animate-pulse rounded-sm bg-zinc-100" />;
+}
+
+interface LazyPdfPageProps {
+  pageNumber: number;
+  pathTemplate: string;
+  pdfRenderWidth: number;
+  documentName: string;
+  onRef: (el: HTMLDivElement | null, pageNumber: number) => void;
+}
+
+function LazyPdfPage({ pageNumber, pathTemplate, pdfRenderWidth, documentName, onRef }: LazyPdfPageProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isVisible, setIsVisible] = useState(pageNumber === 1);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element || isVisible) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '300px 0px' }
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isVisible]);
+
+  return (
+    <div
+      ref={(element) => {
+        containerRef.current = element;
+        onRef(element, pageNumber);
+      }}
+      data-page-number={pageNumber}
+      className="mx-auto flex w-full max-w-5xl flex-col gap-2"
+    >
+      <div className="text-center text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Page {pageNumber}</div>
+      <div className="relative w-full overflow-hidden rounded-sm bg-white shadow-2xl [aspect-ratio:8.5/11]">
+        {isVisible ? (
+          <img
+            src={buildPdfPageUrl(pathTemplate, pageNumber, pdfRenderWidth)}
+            alt={`${documentName} page ${pageNumber}`}
+            className="absolute inset-0 h-full w-full object-contain"
+          />
+        ) : (
+          <PdfPagePlaceholder />
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function ViewDocument() {
@@ -57,12 +120,21 @@ export function ViewDocument() {
   const [session, setSession] = useState<ViewSession | null>(null);
   const [viewerStatus, setViewerStatus] = useState<ViewerStatus>('active');
   const [preview, setPreview] = useState<PreviewState>({ kind: 'idle' });
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [activePage, setActivePage] = useState(1);
+  const [pdfRenderWidth, setPdfRenderWidth] = useState(() => buildPdfRenderWidth());
+  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const isOpeningSessionRef = useRef(false);
+  const prefetchedPagesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (token) void inspectToken(token);
   }, [token]);
+
+  useEffect(() => {
+    const onResize = () => setPdfRenderWidth(buildPdfRenderWidth());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (!token || !inspection || inspection.require_email || inspection.revoked || inspection.expired || session || isOpeningSessionRef.current) return;
@@ -74,10 +146,6 @@ export function ViewDocument() {
 
   useEffect(() => {
     if (!session) return;
-
-    const interval = window.setInterval(() => {
-      void api.sendViewerHeartbeat(session.session_id, { page_number: 1, duration_ms: 20000 });
-    }, 20000);
 
     const closeSession = () => {
       void api.closeViewSession(session.session_id);
@@ -100,11 +168,20 @@ export function ViewDocument() {
     };
 
     return () => {
-      window.clearInterval(interval);
       window.removeEventListener('beforeunload', closeSession);
       source.close();
     };
   }, [session]);
+
+  useEffect(() => {
+    if (!session || viewerStatus !== 'active') return;
+
+    const timeout = window.setTimeout(() => {
+      void api.sendPageView(session.session_id, activePage);
+    }, 1500);
+
+    return () => window.clearTimeout(timeout);
+  }, [activePage, session, viewerStatus]);
 
   useEffect(() => {
     if (!inspection || inspection.permissions?.print) return;
@@ -123,66 +200,73 @@ export function ViewDocument() {
   }, [inspection]);
 
   useEffect(() => {
+    pageRefs.current = {};
+    prefetchedPagesRef.current.clear();
+    setActivePage(1);
+
     if (!session || viewerStatus !== 'active') {
       setPreview({ kind: 'idle' });
       return;
     }
 
-    let objectUrl: string | null = null;
+    if (!session.inline_view_supported) {
+      setPreview({
+        kind: 'unsupported',
+        message: getInlineUnsupportedMessage(session),
+      });
+      return;
+    }
+
     let cancelled = false;
 
     const loadPreview = async () => {
       setPreview({ kind: 'loading' });
-      try {
-        const response = await api.fetchViewerContent(session.content_path);
-        if (cancelled) return;
 
-        const previewKind = getPreviewKind(session.mime_type, session.document_name);
-
-        if (previewKind === 'pdf' || previewKind === 'image') {
-          const blob = await response.blob();
-          if (cancelled) return;
-          objectUrl = URL.createObjectURL(blob);
-          setPreview({ kind: previewKind, src: previewKind === 'pdf' ? `${objectUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&zoom=page-fit` : objectUrl });
-          return;
-        }
-
-        if (previewKind === 'markdown') {
-          const text = await response.text();
-          if (cancelled) return;
-          const renderedHtml = marked.parse(text, { async: false, breaks: true }) as string;
-          setPreview({ kind: 'html', html: DOMPurify.sanitize(renderedHtml) });
-          return;
-        }
-
-        if (previewKind === 'text') {
-          const text = await response.text();
-          if (cancelled) return;
-          setPreview({ kind: 'text', text });
-          return;
-        }
-
-        if (previewKind === 'docx') {
-          const arrayBuffer = await response.arrayBuffer();
-          if (cancelled) return;
-          try {
-            const mammothModule = await import('mammoth');
-            const mammoth = (mammothModule as unknown as { default?: typeof mammothModule }).default || mammothModule;
-            const result = await mammoth.convertToHtml({ arrayBuffer });
-            if (cancelled) return;
-            setPreview({ kind: 'html', html: DOMPurify.sanitize(result.value) });
-          } catch {
+      if (session.view_kind === 'pdf') {
+        if (session.page_image_path_template && session.page_count && session.page_count > 0) {
+          if (!cancelled) {
             setPreview({
-              kind: 'unsupported',
-              message: 'This Word document could not be rendered safely in the browser. The raw file is not being auto-downloaded because downloads are restricted.',
+              kind: 'pdf_pages',
+              pageCount: session.page_count,
+              pathTemplate: session.page_image_path_template,
             });
           }
           return;
         }
 
+        if (!cancelled) {
+          setPreview({
+            kind: 'unsupported',
+            message: 'The PDF preview metadata is incomplete.',
+          });
+        }
+        return;
+      }
+
+      try {
+        if (session.view_kind === 'image') {
+          setPreview({
+            kind: 'image',
+            src: buildViewerContentUrl(session.content_path),
+            alt: session.document_name,
+          });
+          return;
+        }
+
+        const response = await api.fetchViewerContent(session.content_path);
+        if (cancelled) return;
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+        if (session.view_kind === 'text' || session.view_kind === 'markdown' || session.view_kind === 'code' || contentType.includes('text/html')) {
+          const html = await response.text();
+          if (cancelled) return;
+          setPreview({ kind: 'html', html: DOMPurify.sanitize(html) });
+          return;
+        }
+
         setPreview({
           kind: 'unsupported',
-          message: 'Preview is not available for this file type in the browser viewer. Downloads remain restricted unless the share link explicitly allows them.',
+          message: getInlineUnsupportedMessage(session),
         });
       } catch (err) {
         if (cancelled) return;
@@ -197,9 +281,47 @@ export function ViewDocument() {
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [session, viewerStatus]);
+
+  useEffect(() => {
+    if (preview.kind !== 'pdf_pages') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visiblePages = entries
+          .filter((entry) => entry.isIntersecting)
+          .map((entry) => Number((entry.target as HTMLElement).dataset.pageNumber || '1'))
+          .filter((pageNumber) => Number.isFinite(pageNumber))
+          .sort((left, right) => left - right);
+        if (visiblePages.length > 0) {
+          setActivePage(visiblePages[0]);
+        }
+      },
+      {
+        threshold: 0.6,
+      }
+    );
+
+    (Object.values(pageRefs.current) as Array<HTMLDivElement | null>).forEach((element) => {
+      if (element) observer.observe(element);
+    });
+
+    return () => observer.disconnect();
+  }, [preview, pdfRenderWidth]);
+
+  useEffect(() => {
+    if (preview.kind !== 'pdf_pages' || viewerStatus !== 'active') return;
+
+    const nextPage = activePage + 1;
+    if (nextPage > preview.pageCount) return;
+
+    const prefetchKey = `${preview.pathTemplate}:${pdfRenderWidth}:${nextPage}`;
+    if (prefetchedPagesRef.current.has(prefetchKey)) return;
+
+    prefetchedPagesRef.current.add(prefetchKey);
+    preloadPdfPageImage(preview.pathTemplate, nextPage, pdfRenderWidth);
+  }, [activePage, pdfRenderWidth, preview, viewerStatus]);
 
   async function inspectToken(tokenId: string) {
     setIsLoading(true);
@@ -232,15 +354,8 @@ export function ViewDocument() {
     void openSession(email.trim());
   }
 
-  const watermark = session?.watermark_text || `HexShare • ${inspection?.link || ''}`;
-  const isProtectedFromPrint = !inspection?.permissions?.print;
-
   const handlePrint = () => {
-    if (preview.kind === 'pdf') {
-      iframeRef.current?.contentWindow?.print();
-      return;
-    }
-    if (!isProtectedFromPrint) {
+    if (inspection?.permissions?.print) {
       window.print();
     }
   };
@@ -280,19 +395,42 @@ export function ViewDocument() {
     }
 
     if (preview.kind === 'loading' || preview.kind === 'idle') {
-      return <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Loading protected preview…</div>;
+      return <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Loading protected preview...</div>;
     }
 
-    if (preview.kind === 'image') {
+    if (preview.kind === 'pdf_pages') {
+      const pages = Array.from({ length: preview.pageCount }, (_, index) => index + 1);
       return (
-        <div className="flex h-full w-full items-center justify-center overflow-auto p-4 md:p-6">
-          <img src={preview.src} alt={session.document_name} className="max-h-full max-w-full object-contain shadow-xl" />
+        <div className="h-full w-full overflow-auto bg-zinc-200">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-4 md:px-6 md:py-6">
+            {pages.map((pageNumber) => (
+              <React.Fragment key={pageNumber}>
+                <LazyPdfPage
+                  pageNumber={pageNumber}
+                  pathTemplate={preview.pathTemplate}
+                  pdfRenderWidth={pdfRenderWidth}
+                  documentName={session.document_name}
+                  onRef={(element, observedPageNumber) => {
+                    pageRefs.current[observedPageNumber] = element;
+                  }}
+                />
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       );
     }
 
-    if (preview.kind === 'pdf') {
-      return <iframe ref={iframeRef} src={preview.src} title={session.document_name} className="h-full w-full min-h-0 border-0 bg-white" />;
+    if (preview.kind === 'image') {
+      return (
+        <div className="flex h-full w-full items-center justify-center overflow-auto bg-zinc-200 p-4 md:p-8">
+          <img
+            src={preview.src}
+            alt={preview.alt}
+            className="max-h-full max-w-full rounded-sm bg-white shadow-2xl"
+          />
+        </div>
+      );
     }
 
     if (preview.kind === 'html') {
@@ -302,14 +440,6 @@ export function ViewDocument() {
             className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-6 shadow-lg md:p-10 [&_a]:text-indigo-600 [&_blockquote]:border-l-4 [&_blockquote]:border-zinc-200 [&_blockquote]:pl-4 [&_code]:rounded [&_code]:bg-zinc-100 [&_code]:px-1 [&_code]:py-0.5 [&_h1]:mb-4 [&_h1]:text-3xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-semibold [&_li]:ml-6 [&_li]:list-disc [&_ol]:space-y-2 [&_p]:my-4 [&_pre]:overflow-auto [&_pre]:rounded-xl [&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:text-sm [&_pre]:text-zinc-100 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-zinc-200 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-zinc-200 [&_th]:bg-zinc-50 [&_th]:px-3 [&_th]:py-2 [&_ul]:space-y-2"
             dangerouslySetInnerHTML={{ __html: preview.html }}
           />
-        </div>
-      );
-    }
-
-    if (preview.kind === 'text') {
-      return (
-        <div className="h-full w-full overflow-auto bg-zinc-100 p-4 md:p-8">
-          <pre className="mx-auto w-full max-w-5xl whitespace-pre-wrap break-words rounded-2xl bg-white p-6 text-sm leading-6 text-zinc-800 shadow-lg md:p-10">{preview.text}</pre>
         </div>
       );
     }
@@ -336,12 +466,8 @@ export function ViewDocument() {
         </div>
       </header>
       <main className="relative flex min-h-0 flex-1 overflow-hidden bg-zinc-950">
-        <div className="absolute inset-0 bg-zinc-950" />
         <div className="relative z-10 flex h-full w-full min-h-0 flex-col bg-white">
           <div className="relative flex min-h-0 flex-1 bg-zinc-100">
-            <div className="pointer-events-none absolute inset-0 z-10 select-none opacity-20">
-              <div className="flex h-full w-full items-center justify-center px-6 text-center text-2xl font-semibold tracking-wide text-zinc-500 [transform:rotate(-24deg)] md:text-3xl">{watermark}</div>
-            </div>
             {renderPreview()}
           </div>
         </div>

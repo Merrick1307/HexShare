@@ -1,3 +1,4 @@
+import type { FormEvent } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -46,7 +47,7 @@ export function Groups() {
     return () => window.clearTimeout(timer);
   }, [successMessage]);
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: FormEvent) {
     e.preventDefault();
     if (!formData.name.trim()) return;
     setIsSubmitting(true);
@@ -66,7 +67,7 @@ export function Groups() {
     }
   }
 
-  async function handleEdit(e: React.FormEvent) {
+  async function handleEdit(e: FormEvent) {
     e.preventDefault();
     if (!selectedGroup || !formData.name.trim()) return;
     setIsSubmitting(true);

@@ -15,7 +15,7 @@ A secure document sharing platform with fine-grained access control, built with 
 ### Backend (FastAPI)
 - **Authentication**: OIDC-based authentication with HexIAM
 - **Authorization**: Hybrid edge/PDP authorization with policy-based access control
-- **Storage**: PostgreSQL for metadata, object storage (S3/Cloudinary) for files
+- **Storage**: PostgreSQL for metadata, S3-compatible object storage for files
 - **Token Management**: JWT-based access tokens with automatic refresh
 
 ### Frontend (React + TypeScript)
@@ -57,6 +57,7 @@ DATABASE_URL=postgresql://user:pass@host:5432/hexshare
 
 # HexIAM Integration
 HEXIAM_URL=http://localhost:8000
+HEXIAM_PDP_URL=http://localhost:8000
 HEXIAM_JWT_SECRET=your-jwt-secret
 HEXSHARE_CLIENT_ID=your-client-id
 HEXSHARE_CLIENT_SECRET=your-client-secret
@@ -64,15 +65,33 @@ HEXSHARE_PDP_CLIENT_ID=your-pdp-client-id
 HEXSHARE_PDP_CLIENT_SECRET=your-pdp-client-secret
 
 # URLs
-HEXSHARE_PUBLIC_URL=http://localhost:8001
+HEXSHARE_PUBLIC_URL=http://localhost:8099
 HEXSHARE_FRONTEND_URL=http://localhost:3003
 
-# Object Storage (choose one)
-CLOUDINARY_URL=cloudinary://...
-# or
+# Runtime switches
+HEXSHARE_STORAGE=postgres
+HEXSHARE_ACCESS_CONTROL=hybrid
+HEXSHARE_AUTHENTICATOR=hexiam
+HEXSHARE_IAM_POLICY=hexiam
+HEXSHARE_OBJECT_STORAGE=s3
+HEXSHARE_VIEWER_STRATEGY=secure_streaming
+HEXSHARE_DOCUMENT_PROCESSING_ENABLED=true
+
+# S3-compatible object storage (MinIO/S3/R2)
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
-S3_BUCKET=...
+HEXSHARE_OBJECT_BUCKET=hexshare-documents
+HEXSHARE_OBJECT_PREFIX=documents
+S3_ENDPOINT_URL=http://localhost:9000
+S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
+S3_REGION=us-east-1
+S3_FORCE_PATH_STYLE=true
+
+# Optional alternative adapters
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+CLOUDFLARE_R2_ACCOUNT_ID=
 ```
 
 ### Frontend
@@ -87,18 +106,21 @@ VITE_BASE_PATH=/
 ### Backend
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+poetry install
 
-# Run migrations
-alembic upgrade head
+# Start local stack (API, frontend, Postgres, MinIO)
+docker compose up --build
 
-# Start server
-uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8001 --reload
+# MinIO console
+# http://localhost:9001
+# Local browser upload CORS is configured on the MinIO container via `MINIO_API_CORS_ALLOW_ORIGIN` for:
+# - http://localhost:3000
+# - http://localhost:3003
 ```
 
 ### Frontend
 ```bash
-cd hexshare-frontend
+cd frontend
 npm install
 npm run dev
 ```

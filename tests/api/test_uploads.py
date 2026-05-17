@@ -5,7 +5,9 @@ from fastapi import HTTPException
 
 from app.api.uploads import complete_upload, get_document_download_url, initiate_upload
 from app.auth.tenant_auth import TenantPrincipal
+from app.core.authz import ResourceAction
 from app.domain import Document
+from app.ports.access_control import AccessDenied
 from app.ports.object_storage_port import PresignedUpload
 from app.services.upload_service import UploadInitiation
 
@@ -52,8 +54,15 @@ class StubUploadService:
 class StubDocumentService:
     def __init__(self, document: Document | None):
         self._document = document
+        self.required_calls: list[tuple[str, ResourceAction]] = []
 
     async def get_document(self, **kwargs):
+        return self._document
+
+    async def require_document_access(self, *, principal, document_id: str, required: ResourceAction):
+        self.required_calls.append((document_id, required))
+        if self._document is None:
+            raise ValueError("document_not_found")
         return self._document
 
 
@@ -120,6 +129,53 @@ async def test_download_handler_returns_presigned_url():
 
     assert response.document_id == "doc_1"
     assert response.download_url == "https://storage.test/download/doc_1"
+
+
+@pytest.mark.asyncio
+async def test_download_handler_enforces_export_access():
+    principal = TenantPrincipal(tenant_id="tenant_1", user_id="user_1")
+    document = Document(
+        id="doc_1",
+        tenant_id="tenant_1",
+        name="report.pdf",
+        mime_type="application/pdf",
+        size=123,
+        storage_key="documents/tenants/t1/documents/doc_1/report.pdf",
+        created_at="2026-03-19T00:00:00",
+        created_by="user_1",
+    )
+    document_service = StubDocumentService(document)
+
+    await get_document_download_url(
+        document_id="doc_1",
+        expires_in=900,
+        principal=principal,
+        document_service=document_service,
+        upload_service=StubUploadService(),
+    )
+
+    assert document_service.required_calls == [("doc_1", ResourceAction.EXPORT)]
+
+
+@pytest.mark.asyncio
+async def test_download_handler_403s_when_access_denied():
+    principal = TenantPrincipal(tenant_id="tenant_1", user_id="user_1")
+
+    class DenyingDocumentService(StubDocumentService):
+        async def require_document_access(self, *, principal, document_id: str, required: ResourceAction):
+            raise AccessDenied("insufficient_document_permission")
+
+    with pytest.raises(HTTPException) as exc:
+        await get_document_download_url(
+            document_id="doc_1",
+            expires_in=900,
+            principal=principal,
+            document_service=DenyingDocumentService(None),
+            upload_service=StubUploadService(),
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Forbidden"
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,13 @@ from app.ports.object_storage_port import (
 _FILENAME_SANITIZER = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+def _none_if_blank(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class S3ObjectStorageAdapter(ObjectStoragePort):
     def __init__(
         self,
@@ -34,6 +41,7 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
         bucket: str,
         region_name: str | None = None,
         endpoint_url: str | None = None,
+        public_endpoint_url: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
         session_token: str | None = None,
@@ -44,9 +52,17 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
         if boto3 is None or Config is None:
             raise RuntimeError("boto3 is required to use S3 object storage")
 
+        region_name = _none_if_blank(region_name)
+        endpoint_url = _none_if_blank(endpoint_url)
+        public_endpoint_url = _none_if_blank(public_endpoint_url) or endpoint_url
+        access_key_id = _none_if_blank(access_key_id)
+        secret_access_key = _none_if_blank(secret_access_key)
+        session_token = _none_if_blank(session_token)
+
         self.bucket = bucket
         self.region_name = region_name
         self.endpoint_url = endpoint_url
+        self.public_endpoint_url = public_endpoint_url
         self.prefix = prefix.strip("/")
         self.force_path_style = force_path_style
         self.signature_version = signature_version
@@ -61,6 +77,15 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
             "s3",
             region_name=region_name,
             endpoint_url=endpoint_url,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            aws_session_token=session_token,
+            config=config,
+        )
+        self._presign_client = boto3.client(
+            "s3",
+            region_name=region_name,
+            endpoint_url=self.public_endpoint_url,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
             aws_session_token=session_token,
@@ -113,7 +138,7 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
         expires_in: int = 900,
     ) -> TemporaryObjectAccess:
         def _generate() -> str:
-            return self._client.generate_presigned_url(
+            return self._presign_client.generate_presigned_url(
                 ClientMethod="put_object",
                 Params={
                     "Bucket": self.bucket,
@@ -147,7 +172,7 @@ class S3ObjectStorageAdapter(ObjectStoragePort):
             }
             if filename:
                 params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
-            return self._client.generate_presigned_url(
+            return self._presign_client.generate_presigned_url(
                 ClientMethod="get_object",
                 Params=params,
                 ExpiresIn=expires_in,
@@ -198,8 +223,9 @@ def _to_bool(value: str | None, default: bool = False) -> bool:
 def _load_s3_config() -> dict[str, Any]:
     return {
         "bucket": os.getenv("HEXSHARE_OBJECT_BUCKET", ""),
-        "region_name": os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"),
+        "region_name": os.getenv("S3_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"),
         "endpoint_url": os.getenv("S3_ENDPOINT_URL"),
+        "public_endpoint_url": os.getenv("S3_PUBLIC_ENDPOINT_URL") or os.getenv("S3_ENDPOINT_URL"),
         "access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
         "secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
         "session_token": os.getenv("AWS_SESSION_TOKEN"),

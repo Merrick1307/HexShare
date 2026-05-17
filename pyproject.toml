@@ -19,6 +19,8 @@ boto3 = "^1.42.73"
 cloudinary = "^1.44.1"
 psycopg2-binary = "^2.9.11"
 pdf-oxide = "^0.3.49"
+pillow = "^12.2.0"
+arq = "^0.28.0"
 
 
 [build-system]

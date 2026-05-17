@@ -1,6 +1,13 @@
-FROM python:3.14-alpine
+FROM python:3.14-slim
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-liberation2 \
+    fonts-dejavu-core \
+    fonts-noto-core \
+    fontconfig \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir poetry
 

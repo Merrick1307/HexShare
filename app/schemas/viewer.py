@@ -37,8 +37,5 @@ class CreateViewSessionResponse(BaseModel):
     inline_view_supported: bool = True
     view_kind: str = "unsupported"
     view_reason: str | None = None
-
-
-class ViewerHeartbeatRequest(BaseModel):
-    page_number: int | None = Field(default=None, ge=1)
-    duration_ms: int | None = Field(default=None, ge=0)
+    page_count: int | None = None
+    page_image_path_template: str | None = None

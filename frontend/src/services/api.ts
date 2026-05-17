@@ -30,7 +30,7 @@ function toAbsoluteFrontendUrl(pathOrUrl: string) {
   return `${window.location.origin}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`;
 }
 
-async function parseResponse(response: Response) {
+async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -42,12 +42,12 @@ async function parseResponse(response: Response) {
     throw new Error(text || `HTTP error ${response.status}`);
   }
 
-  if (response.status === 204) return null;
+  if (response.status === 204) return null as T;
 
   const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) return response.json();
+  if (contentType.includes('application/json')) return response.json() as Promise<T>;
 
-  return response.text();
+  return response.text() as T;
 }
 
 let isRefreshing = false;
@@ -79,7 +79,7 @@ async function tryRefreshToken(): Promise<boolean> {
   return refreshPromise;
 }
 
-async function fetchWithAuth(url: string, options: RequestInit = {}, retried = false): Promise<unknown> {
+async function fetchWithAuth<T>(url: string, options: RequestInit = {}, retried = false): Promise<T> {
   const response = await fetch(url, {
     cache: 'no-store',
     ...options,
@@ -93,16 +93,16 @@ async function fetchWithAuth(url: string, options: RequestInit = {}, retried = f
   if (response.status === 401 && !retried) {
     const refreshed = await tryRefreshToken();
     if (refreshed) {
-      return fetchWithAuth(url, options, true);
+      return fetchWithAuth<T>(url, options, true);
     }
     window.location.href = `${AUTH_PREFIX}/auth/login`;
     throw new Error('Session expired. Redirecting to login...');
   }
 
-  return parseResponse(response);
+  return parseResponse<T>(response);
 }
 
-async function fetchPublic(url: string, options: RequestInit = {}) {
+async function fetchPublic<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     cache: 'no-store',
     ...options,
@@ -111,7 +111,7 @@ async function fetchPublic(url: string, options: RequestInit = {}) {
       ...options.headers,
     },
   });
-  return parseResponse(response);
+  return parseResponse<T>(response);
 }
 
 export const api = {
@@ -139,11 +139,11 @@ export const api = {
   toAbsoluteFrontendUrl,
 
   async listDocuments(): Promise<Document[]> {
-    return fetchWithAuth(`${API_PREFIX}/documents`);
+    return fetchWithAuth<Document[]>(`${API_PREFIX}/documents`);
   },
 
   async getDocument(documentId: string): Promise<Document> {
-    return fetchWithAuth(`${API_PREFIX}/documents/${documentId}`);
+    return fetchWithAuth<Document>(`${API_PREFIX}/documents/${documentId}`);
   },
 
   async createDocument(data: CreateDocumentInput): Promise<Document> {
@@ -153,20 +153,20 @@ export const api = {
       size: data.size.toString(),
       storage_key: data.storage_key,
     });
-    return fetchWithAuth(`${API_PREFIX}/documents?${params.toString()}`, { method: 'POST' });
+    return fetchWithAuth<Document>(`${API_PREFIX}/documents?${params.toString()}`, { method: 'POST' });
   },
 
   async deleteDocument(documentId: string): Promise<void> {
-    return fetchWithAuth(`${API_PREFIX}/documents/${documentId}`, { method: 'DELETE' });
+    return fetchWithAuth<void>(`${API_PREFIX}/documents/${documentId}`, { method: 'DELETE' });
   },
 
   async moveDocumentToGroup(documentId: string, groupId: string | null): Promise<Document> {
     const params = groupId ? `?group_id=${encodeURIComponent(groupId)}` : '';
-    return fetchWithAuth(`${API_PREFIX}/documents/${documentId}/group${params}`, { method: 'PATCH' });
+    return fetchWithAuth<Document>(`${API_PREFIX}/documents/${documentId}/group${params}`, { method: 'PATCH' });
   },
 
   async initiateUpload(file: File): Promise<UploadInitResponse> {
-    return fetchWithAuth(`${API_PREFIX}/uploads/initiate`, {
+    return fetchWithAuth<UploadInitResponse>(`${API_PREFIX}/uploads/initiate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -184,7 +184,7 @@ export const api = {
     mime_type: string;
     size: number;
   }): Promise<Document> {
-    return fetchWithAuth(`${API_PREFIX}/uploads/complete`, {
+    return fetchWithAuth<Document>(`${API_PREFIX}/uploads/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -215,7 +215,7 @@ export const api = {
 
   async listLinks(documentId?: string): Promise<ShareLink[]> {
     const url = documentId ? `${API_PREFIX}/documents/${documentId}/links` : `${API_PREFIX}/links`;
-    return fetchWithAuth(url);
+    return fetchWithAuth<ShareLink[]>(url);
   },
 
   async createLink(
@@ -235,25 +235,25 @@ export const api = {
     if (data.require_email) params.append('require_email', 'true');
     data.allowed_emails.forEach((email) => params.append('allowed_emails', email));
 
-    return fetchWithAuth(`${API_PREFIX}/documents/${documentId}/links?${params.toString()}`, {
+    return fetchWithAuth<ShareLink>(`${API_PREFIX}/documents/${documentId}/links?${params.toString()}`, {
       method: 'POST',
     });
   },
 
   async revokeLink(linkId: string): Promise<void> {
-    await fetchWithAuth(`${API_PREFIX}/links/${linkId}/revoke`, { method: 'POST' });
+    await fetchWithAuth<void>(`${API_PREFIX}/links/${linkId}/revoke`, { method: 'POST' });
   },
 
   async getAnalytics(documentId: string): Promise<DocumentAnalytics> {
-    return fetchWithAuth(`${API_PREFIX}/documents/${documentId}/analytics`);
+    return fetchWithAuth<DocumentAnalytics>(`${API_PREFIX}/documents/${documentId}/analytics`);
   },
 
   async inspectShareLink(token: string): Promise<ShareInspection> {
-    return fetchPublic(`${API_PREFIX}/view/${token}`);
+    return fetchPublic<ShareInspection>(`${API_PREFIX}/view/${token}`);
   },
 
   async createViewSession(token: string, email?: string): Promise<ViewSession> {
-    return fetchPublic(`${API_PREFIX}/view/${token}/sessions`, {
+    return fetchPublic<ViewSession>(`${API_PREFIX}/view/${token}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: email || null }),
@@ -278,34 +278,32 @@ export const api = {
     return response;
   },
 
-  async sendViewerHeartbeat(sessionId: string, payload: { page_number?: number; duration_ms?: number } = {}): Promise<void> {
-    await fetchPublic(`${API_PREFIX}/view-sessions/${sessionId}/heartbeat`, {
+  async sendPageView(sessionId: string, pageNumber: number): Promise<void> {
+    await fetchPublic<void>(`${API_PREFIX}/view-sessions/${sessionId}/page-view?page_number=${pageNumber}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
     });
   },
 
   async closeViewSession(sessionId: string): Promise<void> {
-    await fetchPublic(`${API_PREFIX}/view-sessions/${sessionId}/close`, { method: 'POST' });
+    await fetchPublic<void>(`${API_PREFIX}/view-sessions/${sessionId}/close`, { method: 'POST' });
   },
 
   async listGroups(): Promise<DocumentGroup[]> {
-    return fetchWithAuth(`${API_PREFIX}/document-groups`);
+    return fetchWithAuth<DocumentGroup[]>(`${API_PREFIX}/document-groups`);
   },
 
   async createGroup(data: { name: string; description?: string }): Promise<DocumentGroup> {
     const params = new URLSearchParams({ name: data.name });
     if (data.description) params.append('description', data.description);
-    return fetchWithAuth(`${API_PREFIX}/document-groups?${params.toString()}`, { method: 'POST' });
+    return fetchWithAuth<DocumentGroup>(`${API_PREFIX}/document-groups?${params.toString()}`, { method: 'POST' });
   },
 
   async getGroup(groupId: string): Promise<DocumentGroup> {
-    return fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}`);
+    return fetchWithAuth<DocumentGroup>(`${API_PREFIX}/document-groups/${groupId}`);
   },
 
   async updateGroup(groupId: string, data: { name?: string; description?: string }): Promise<DocumentGroup> {
-    return fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}`, {
+    return fetchWithAuth<DocumentGroup>(`${API_PREFIX}/document-groups/${groupId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -313,11 +311,11 @@ export const api = {
   },
 
   async deleteGroup(groupId: string): Promise<void> {
-    await fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}`, { method: 'DELETE' });
+    await fetchWithAuth<void>(`${API_PREFIX}/document-groups/${groupId}`, { method: 'DELETE' });
   },
 
   async listGroupDocuments(groupId: string): Promise<Document[]> {
-    return fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}/documents`);
+    return fetchWithAuth<Document[]>(`${API_PREFIX}/document-groups/${groupId}/documents`);
   },
 
   async createDocumentInGroup(
@@ -330,18 +328,18 @@ export const api = {
       size: data.size.toString(),
       storage_key: data.storage_key,
     });
-    return fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}/documents?${params.toString()}`, {
+    return fetchWithAuth<Document>(`${API_PREFIX}/document-groups/${groupId}/documents?${params.toString()}`, {
       method: 'POST',
     });
   },
 
   async addGroupMember(groupId: string, userId: string, role: 'member' | 'owner' = 'member'): Promise<{ status: string; user_id: string; role: string }> {
     const params = new URLSearchParams({ user_id: userId, role });
-    return fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}/members?${params.toString()}`, { method: 'POST' });
+    return fetchWithAuth<{ status: string; user_id: string; role: string }>(`${API_PREFIX}/document-groups/${groupId}/members?${params.toString()}`, { method: 'POST' });
   },
 
   async removeGroupMember(groupId: string, userId: string): Promise<void> {
-    await fetchWithAuth(`${API_PREFIX}/document-groups/${groupId}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+    await fetchWithAuth<void>(`${API_PREFIX}/document-groups/${groupId}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
   },
 
   async listWorkspaceUsers(page: number = 1, pageSize: number = 20, search?: string): Promise<{
@@ -352,6 +350,11 @@ export const api = {
   }> {
     const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() });
     if (search) params.set('search', search);
-    return fetchWithAuth(`${API_PREFIX}/workspace/users?${params.toString()}`);
+    return fetchWithAuth<{
+      users: Array<{ id: string; user_id?: string; email?: string; name?: string; username?: string }>;
+      total: number;
+      page: number;
+      page_size: number;
+    }>(`${API_PREFIX}/workspace/users?${params.toString()}`);
   },
 };

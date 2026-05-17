@@ -24,7 +24,9 @@ from app.infra.factories import (
     AuthenticatorFactory,
     IAMPolicyFactory,
     ObjectStorageFactory,
+    RenderedPageCacheFactory,
     StorageFactory,
+    TaskQueueFactory,
 )
 from app.services import (
     AnalyticsService,
@@ -37,6 +39,12 @@ from app.services import (
 )
 
 
+def _to_bool(value: str | None, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     dp_pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
@@ -44,9 +52,17 @@ async def lifespan(fastapi_app: FastAPI):
     preferred_storage = os.getenv("HEXSHARE_STORAGE", "postgres")
     preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
     preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
-    preferred_object_storage = os.getenv("HEXSHARE_OBJECT_STORAGE", "cloudinary")
+    preferred_object_storage = os.getenv("HEXSHARE_OBJECT_STORAGE", "s3")
+    preferred_rendered_page_cache = os.getenv("HEXSHARE_RENDERED_PAGE_CACHE", "inmemory")
+    preferred_task_queue = os.getenv("HEXSHARE_TASK_QUEUE", "noop")
     preferred_iam_policy = os.getenv("HEXSHARE_IAM_POLICY", "hexiam")
     pdp_iam_url = os.getenv("HEXIAM_PDP_URL") or os.getenv("HEXIAM_URL", "http://localhost:8000")
+    viewer_strategy = os.getenv("HEXSHARE_VIEWER_STRATEGY", "secure_streaming").strip() or "secure_streaming"
+    document_processing_enabled = _to_bool(
+        os.getenv("HEXSHARE_DOCUMENT_PROCESSING_ENABLED"),
+        default=True,
+    )
+    frontend_url = os.getenv("HEXSHARE_FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
     import app.infra.bootstrap  # noqa: F401
 
@@ -55,6 +71,8 @@ async def lifespan(fastapi_app: FastAPI):
 
     persistence_layer = StorageFactory.create(preferred_storage, pool=dp_pool)
     object_storage = ObjectStorageFactory.create(preferred_object_storage)
+    rendered_page_cache = RenderedPageCacheFactory.create(preferred_rendered_page_cache)
+    task_queue = TaskQueueFactory.create(preferred_task_queue)
     iam_policy = IAMPolicyFactory.create(preferred_iam_policy)
 
     access_control = AccessControlFactory.create(
@@ -80,6 +98,8 @@ async def lifespan(fastapi_app: FastAPI):
     viewer_service = ViewerService(
         storage=persistence_layer,
         object_storage=object_storage,
+        rendered_page_cache=rendered_page_cache,
+        task_queue=task_queue,
         document_processor=document_processor,
         document_service=document_service,
         link_service=link_service,
@@ -88,11 +108,15 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.pool = dp_pool
     fastapi_app.state.storage = persistence_layer
     fastapi_app.state.object_storage = object_storage
+    fastapi_app.state.rendered_page_cache = rendered_page_cache
+    fastapi_app.state.task_queue = task_queue
     fastapi_app.state.token_adapter = token_adapter
     fastapi_app.state.event_bus = event_bus
     fastapi_app.state.document_service = document_service
     fastapi_app.state.document_group_service = document_group_service
     fastapi_app.state.document_processor = document_processor
+    fastapi_app.state.viewer_strategy = viewer_strategy
+    fastapi_app.state.document_processing_enabled = document_processing_enabled
     fastapi_app.state.iam_policy = iam_policy
     fastapi_app.state.upload_service = upload_service
     fastapi_app.state.link_service = link_service
@@ -108,6 +132,7 @@ async def lifespan(fastapi_app: FastAPI):
             client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", ""),
         )
     }
+    fastapi_app.state.frontend_url = frontend_url
 
     yield
 

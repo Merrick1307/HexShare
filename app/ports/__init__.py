@@ -10,13 +10,23 @@ or mock implementations.
 from .storage_port import StoragePort
 from .token_port import TokenPort
 from .event_bus_port import EventBusPort
-from .object_storage_port import ObjectStoragePort, PresignedUpload, ObjectInfo
+from .object_storage_port import (
+    ObjectDescriptor,
+    ObjectInfo,
+    ObjectStoragePort,
+    ObjectWriteRequest,
+    PresignedUpload,
+    TemporaryObjectAccess,
+)
 
 __all__ = [
     "StoragePort",
     "TokenPort",
     "EventBusPort",
     "ObjectStoragePort",
+    "TemporaryObjectAccess",
     "PresignedUpload",
+    "ObjectDescriptor",
     "ObjectInfo",
+    "ObjectWriteRequest",
 ]

@@ -6,6 +6,8 @@ import time
 from pathlib import PurePosixPath
 from typing import Any, Optional
 
+import httpx
+
 try:
     import cloudinary
     from cloudinary import api as cloudinary_api
@@ -18,7 +20,12 @@ except ImportError:
     cloudinary_utils = None  # type: ignore
 
 from app.infra.factories import ObjectStorageFactory
-from app.ports.object_storage_port import ObjectInfo, ObjectStoragePort, PresignedUpload
+from app.ports.object_storage_port import (
+    ObjectDescriptor,
+    ObjectStoragePort,
+    ObjectWriteRequest,
+    TemporaryObjectAccess,
+)
 
 
 _FILENAME_SANITIZER = re.compile(r"[^A-Za-z0-9._-]+")
@@ -46,6 +53,14 @@ class CloudinaryObjectStorageAdapter(ObjectStoragePort):
         resource_type: str = "raw",
         delivery_type: str = "private",
     ) -> None:
+        if (
+            cloudinary is None
+            or cloudinary_api is None
+            or cloudinary_uploader is None
+            or cloudinary_utils is None
+        ):
+            raise RuntimeError("cloudinary is required to use Cloudinary object storage")
+
         self.cloud_name = cloud_name
         self.api_key = api_key
         self.api_secret = api_secret
@@ -88,13 +103,36 @@ class CloudinaryObjectStorageAdapter(ObjectStoragePort):
         base = (self.upload_prefix or "https://api.cloudinary.com").rstrip("/")
         return f"{base}/v1_1/{self.cloud_name}/{self.resource_type}/upload"
 
-    async def create_presigned_upload(
+    async def read_object(self, *, object_key: str) -> bytes:
+        access = await self.create_temporary_download(object_key=object_key, expires_in=120)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
+            response = await client.get(access.url)
+            response.raise_for_status()
+            return response.content
+
+    async def write_object(self, request: ObjectWriteRequest) -> ObjectDescriptor:
+        result = cloudinary_uploader.upload(
+            request.content,
+            public_id=request.object_key,
+            resource_type=self.resource_type,
+            type=self.delivery_type,
+            overwrite=True,
+        )
+        return ObjectDescriptor(
+            object_key=request.object_key,
+            size=result.get("bytes") or len(request.content),
+            etag=result.get("etag"),
+            content_type=request.content_type,
+            metadata=dict(request.metadata or {}),
+        )
+
+    async def create_temporary_upload(
         self,
         *,
         object_key: str,
         content_type: str,
         expires_in: int = 900,
-    ) -> PresignedUpload:
+    ) -> TemporaryObjectAccess:
         timestamp = int(time.time())
         params_to_sign = {
             "public_id": object_key,
@@ -111,37 +149,42 @@ class CloudinaryObjectStorageAdapter(ObjectStoragePort):
             "type": self.delivery_type,
         }
 
-        return PresignedUpload(
+        return TemporaryObjectAccess(
             object_key=object_key,
             url=self._upload_endpoint(),
             method="POST",
             headers={},
-            form_fields=form_fields,
+            fields=form_fields,
             expires_in=expires_in,
         )
 
-    async def create_presigned_download(
+    async def create_temporary_download(
         self,
         *,
         object_key: str,
         expires_in: int = 900,
         filename: Optional[str] = None,
-    ) -> str:
+    ) -> TemporaryObjectAccess:
         expires_at = int(time.time()) + int(expires_in)
         suffix = PurePosixPath(object_key).suffix.lstrip(".")
         if not suffix:
             raise ValueError("Cloudinary raw downloads require a file extension in object_key")
 
-        return cloudinary_utils.private_download_url(
-            object_key,
-            suffix,
-            resource_type=self.resource_type,
-            type=self.delivery_type,
-            expires_at=expires_at,
-            attachment=bool(filename),
+        return TemporaryObjectAccess(
+            object_key=object_key,
+            url=cloudinary_utils.private_download_url(
+                object_key,
+                suffix,
+                resource_type=self.resource_type,
+                type=self.delivery_type,
+                expires_at=expires_at,
+                attachment=bool(filename),
+            ),
+            method="GET",
+            expires_in=expires_in,
         )
 
-    async def head_object(self, *, object_key: str) -> ObjectInfo | None:
+    async def head_object(self, *, object_key: str) -> ObjectDescriptor | None:
         try:
             resp = cloudinary_api.resource(
                 object_key,
@@ -166,7 +209,7 @@ class CloudinaryObjectStorageAdapter(ObjectStoragePort):
         }
         metadata = {k: v for k, v in metadata.items() if v is not None}
 
-        return ObjectInfo(
+        return ObjectDescriptor(
             object_key=object_key,
             size=resp.get("bytes"),
             etag=resp.get("etag"),

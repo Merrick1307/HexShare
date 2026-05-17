@@ -6,7 +6,7 @@ import pytest
 
 from app.adapters import MemoryStorage, NoopEventBus
 from app.domain import Document
-from app.ports.object_storage_port import ObjectInfo, ObjectStoragePort, PresignedUpload
+from app.ports.object_storage_port import ObjectInfo, ObjectStoragePort, ObjectWriteRequest, TemporaryObjectAccess
 from app.services.document_service import DocumentService
 from app.services.upload_service import UploadService
 
@@ -14,6 +14,7 @@ from app.services.upload_service import UploadService
 class InMemoryObjectStorage(ObjectStoragePort):
     def __init__(self) -> None:
         self._objects: dict[str, ObjectInfo] = {}
+        self._content: dict[str, bytes] = {}
 
     def put_object(self, *, object_key: str, size: int, etag: str | None = None, content_type: str | None = None):
         self._objects[object_key] = ObjectInfo(
@@ -27,8 +28,23 @@ class InMemoryObjectStorage(ObjectStoragePort):
     def build_object_key(self, *, tenant_id: str, document_id: str, filename: str) -> str:
         return f"documents/tenants/{tenant_id}/documents/{document_id}/{filename}"
 
-    async def create_presigned_upload(self, *, object_key: str, content_type: str, expires_in: int = 900) -> PresignedUpload:
-        return PresignedUpload(
+    async def read_object(self, *, object_key: str) -> bytes:
+        return self._content.get(object_key, b"")
+
+    async def write_object(self, request: ObjectWriteRequest) -> ObjectInfo:
+        self._content[request.object_key] = request.content
+        info = ObjectInfo(
+            object_key=request.object_key,
+            size=len(request.content),
+            etag=None,
+            content_type=request.content_type,
+            metadata=dict(request.metadata or {}),
+        )
+        self._objects[request.object_key] = info
+        return info
+
+    async def create_temporary_upload(self, *, object_key: str, content_type: str, expires_in: int = 900) -> TemporaryObjectAccess:
+        return TemporaryObjectAccess(
             object_key=object_key,
             url=f"https://objects.test/upload/{object_key}",
             method="PUT",
@@ -36,8 +52,13 @@ class InMemoryObjectStorage(ObjectStoragePort):
             expires_in=expires_in,
         )
 
-    async def create_presigned_download(self, *, object_key: str, expires_in: int = 900, filename: str | None = None) -> str:
-        return f"https://objects.test/download/{object_key}?expires_in={expires_in}"
+    async def create_temporary_download(self, *, object_key: str, expires_in: int = 900, filename: str | None = None) -> TemporaryObjectAccess:
+        return TemporaryObjectAccess(
+            object_key=object_key,
+            url=f"https://objects.test/download/{object_key}?expires_in={expires_in}",
+            method="GET",
+            expires_in=expires_in,
+        )
 
     async def head_object(self, *, object_key: str) -> ObjectInfo | None:
         return self._objects.get(object_key)

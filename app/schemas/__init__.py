@@ -9,7 +9,6 @@ from .viewer import (
     CreateViewSessionRequest,
     CreateViewSessionResponse,
     ShareLinkInspectionResponse,
-    ViewerHeartbeatRequest,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "CreateViewSessionRequest",
     "CreateViewSessionResponse",
     "ShareLinkInspectionResponse",
-    "ViewerHeartbeatRequest",
 ]

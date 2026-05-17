@@ -63,6 +63,11 @@ export interface ViewSession {
   download_path?: string | null;
   events_path: string;
   watermark_text?: string | null;
+  inline_view_supported: boolean;
+  view_kind: string;
+  view_reason?: string | null;
+  page_count?: number | null;
+  page_image_path_template?: string | null;
 }
 
 export interface DocumentGroup {

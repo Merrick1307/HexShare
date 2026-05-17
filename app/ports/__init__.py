@@ -10,6 +10,8 @@ or mock implementations.
 from .storage_port import StoragePort
 from .token_port import TokenPort
 from .event_bus_port import EventBusPort
+from .rendered_page_cache_port import RenderedPageCachePort
+from .task_queue_port import TaskQueuePort
 from .object_storage_port import (
     ObjectDescriptor,
     ObjectInfo,
@@ -23,6 +25,8 @@ __all__ = [
     "StoragePort",
     "TokenPort",
     "EventBusPort",
+    "RenderedPageCachePort",
+    "TaskQueuePort",
     "ObjectStoragePort",
     "TemporaryObjectAccess",
     "PresignedUpload",

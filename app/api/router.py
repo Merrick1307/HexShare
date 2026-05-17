@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -14,20 +15,19 @@ from app.api.dependencies.services import (
     get_iam_policy,
     get_link_service,
     get_share_auth,
-    get_viewer_service, get_access_control,
+    get_viewer_service,
 )
 from app.auth import ShareTokenClaims, TenantPrincipal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
-from app.core.authz import GenericResources, ResourceAction
+from app.core.authz import ResourceAction
 from app.domain import Document, DocumentGroup, ShareLink
-from app.ports.access_control import AccessControlPort, AccessDenied, ResourceCtx
+from app.ports.access_control import AccessDenied
 from app.schemas.share import ShareLinkResponse
 from app.schemas.viewer import (
     CreateViewSessionRequest,
     CreateViewSessionResponse,
     ShareLinkInspectionResponse,
-    ViewerHeartbeatRequest,
 )
 from app.services import (
     AnalyticsService,
@@ -55,6 +55,12 @@ def _apply_viewer_headers(response: StreamingResponse, *, filename: str, disposi
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Content-Disposition"] = f'{disposition}; filename="{filename}"'
     return response
+
+
+def _build_page_image_filename(filename: str, page_number: int) -> str:
+    path = Path(filename)
+    stem = path.stem or "document"
+    return f"{stem}-page-{page_number}.png"
 
 
 def _serialize_link(link: ShareLink, token: str) -> ShareLinkResponse:
@@ -87,13 +93,7 @@ def api_router() -> APIRouter:
         storage_key: str = Query(..., description="Key in object storage"),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
-        access_control: AccessControlPort = Depends(get_access_control),
     ) -> Document:
-        await access_control.authorize(
-            bearer_token=principal.token,
-            action="WRITE",
-            resource=ResourceCtx(id=GenericResources.DOCUMENTS.value, type="documents"),
-        )
         return await document_service.create_document(
             tenant_id=principal.tenant_id,
             name=name,
@@ -107,13 +107,7 @@ def api_router() -> APIRouter:
     async def list_documents(
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
-        access_control: AccessControlPort = Depends(get_access_control),
     ) -> list[Document]:
-        await access_control.authorize(
-            bearer_token=principal.token,
-            action="READ",
-            resource=ResourceCtx(id=GenericResources.DOCUMENTS.value, type="documents"),
-        )
         docs = await document_service.list_accessible_documents(principal=principal)
         return list(docs)
 
@@ -578,10 +572,16 @@ def api_router() -> APIRouter:
                 else None
             ),
             events_path=f"/api/v1/view-sessions/{session.id}/events",
-            watermark_text=f"HexShare • {watermark}",
+            watermark_text=f"HexShare - {watermark}",
             inline_view_supported=delivery.view_policy.inline_view_supported,
             view_kind=delivery.view_policy.view_kind,
             view_reason=delivery.view_policy.reason,
+            page_count=delivery.pdf_preview.page_count if delivery.pdf_preview else None,
+            page_image_path_template=(
+                f"/api/v1/view-sessions/{session.id}/pages/{{page}}"
+                if delivery.pdf_preview
+                else None
+            ),
         )
 
     @router.get("/view-sessions/{session_id}/content")
@@ -601,7 +601,12 @@ def api_router() -> APIRouter:
             raise HTTPException(status_code=status_code, detail=detail)
         except DocumentProcessingError as exc:
             detail = str(exc)
-            status_code = 415 if detail == "inline_view_not_supported" else 422
+            if detail == "inline_view_not_supported":
+                status_code = 415
+            elif detail == "page_image_view_required":
+                status_code = 409
+            else:
+                status_code = 422
             raise HTTPException(status_code=status_code, detail=detail)
 
         response = StreamingResponse(
@@ -611,6 +616,51 @@ def api_router() -> APIRouter:
         return _apply_viewer_headers(
             response,
             filename=streamed.filename,
+            disposition="inline",
+        )
+
+    @router.get("/view-sessions/{session_id}/pages/{page_number}")
+    async def stream_view_page_image(
+        session_id: str,
+        page_number: int,
+        width: int = Query(1400, ge=400, le=2200),
+        viewer_service: ViewerService = Depends(get_viewer_service),
+    ) -> StreamingResponse:
+        try:
+            rendered = await viewer_service.render_document_page(
+                session_id=session_id,
+                page_number=page_number,
+                render_width=width,
+            )
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 404
+            if detail in {"revoked", "session_closed"}:
+                status_code = 403
+            elif detail == "expired":
+                status_code = 410
+            raise HTTPException(status_code=status_code, detail=detail)
+        except DocumentProcessingError as exc:
+            detail = str(exc)
+            if detail == "page_out_of_range":
+                status_code = 404
+            elif detail == "invalid_page_number":
+                status_code = 400
+            elif detail == "page_image_view_not_supported":
+                status_code = 415
+            elif detail == "inline_view_backend_unavailable":
+                status_code = 503
+            else:
+                status_code = 422
+            raise HTTPException(status_code=status_code, detail=detail)
+
+        response = StreamingResponse(
+            _stream_bytes(rendered.content),
+            media_type=rendered.media_type,
+        )
+        return _apply_viewer_headers(
+            response,
+            filename=_build_page_image_filename(f"{session_id}.pdf", page_number),
             disposition="inline",
         )
 
@@ -662,19 +712,18 @@ def api_router() -> APIRouter:
             disposition="attachment",
         )
 
-    @router.post("/view-sessions/{session_id}/heartbeat")
-    async def viewer_heartbeat(
+    @router.post("/view-sessions/{session_id}/page-view")
+    async def record_page_view(
         session_id: str,
-        payload: ViewerHeartbeatRequest,
+        page_number: int = Query(..., ge=1, description="Page number being viewed"),
         viewer_service: ViewerService = Depends(get_viewer_service),
     ) -> dict:
         try:
             resolved = await viewer_service.resolve_view_session(session_id=session_id)
-            await viewer_service.record_heartbeat(
+            await viewer_service.record_page_view(
                 tenant_id=resolved.session.tenant_id,
                 session_id=session_id,
-                page_number=payload.page_number,
-                duration_ms=payload.duration_ms,
+                page_number=page_number,
             )
         except ValueError as exc:
             detail = str(exc)
@@ -725,7 +774,10 @@ def api_router() -> APIRouter:
                 yield f'event: status\ndata: {{"status":"{status}"}}\n\n'
                 if status != "active":
                     break
-                await asyncio.sleep(2)
+                try:
+                    await asyncio.sleep(2)
+                except asyncio.CancelledError:
+                    break
 
         return StreamingResponse(
             event_generator(),

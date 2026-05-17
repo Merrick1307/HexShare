@@ -38,7 +38,7 @@ def _load_r2_config() -> dict[str, Any]:
     return {
         "account_id": account_id,
         "bucket": os.getenv("HEXSHARE_OBJECT_BUCKET", ""),
-        "region_name": os.getenv("AWS_REGION", "auto"),
+        "region_name": os.getenv("S3_REGION") or os.getenv("AWS_REGION", "auto"),
         "endpoint_url": os.getenv("S3_ENDPOINT_URL") or (
             f"https://{account_id}.r2.cloudflarestorage.com" if account_id else None
         ),

@@ -1,3 +1,4 @@
+import type { FormEvent } from 'react';
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -91,7 +92,7 @@ export function GroupDetails() {
     setIsMemberModalOpen(true);
   }
 
-  async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
+  async function handleUpload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!id) return;
     setUploadError(null);

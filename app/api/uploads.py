@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.dependencies.services import get_document_service, get_upload_service
 from app.auth import TenantPrincipal
 from app.auth.tenant_auth import get_tenant_auth
+from app.core.authz import ResourceAction
 from app.domain import Document
+from app.ports.access_control import AccessDenied
 from app.schemas.upload import (
     CompleteUploadRequest,
     DownloadUrlResponse,
@@ -78,11 +80,15 @@ async def get_document_download_url(
     document_service: DocumentService = Depends(get_document_service),
     upload_service: UploadService = Depends(get_upload_service),
 ) -> DownloadUrlResponse:
-    document = await document_service.get_document(
-        tenant_id=principal.tenant_id,
-        document_id=document_id,
-    )
-    if not document:
+    try:
+        document = await document_service.require_document_access(
+            principal=principal,
+            document_id=document_id,
+            required=ResourceAction.EXPORT,
+        )
+    except AccessDenied:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    except ValueError:
         raise HTTPException(status_code=404, detail="Document not found")
 
     download_url = await upload_service.get_download_url(

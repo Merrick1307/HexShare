@@ -7,6 +7,8 @@ from app.ports.access_control import AccessControlPort
 from app.ports.authn import AuthenticatorPort
 from app.ports.iam_policy import IAMPolicyPort
 from app.ports.oidc_client import OIDCClientPort
+from app.ports.rendered_page_cache_port import RenderedPageCachePort
+from app.ports.task_queue_port import TaskQueuePort
 
 
 class AccessControlFactory:
@@ -115,3 +117,39 @@ class StorageFactory:
             return cls._registry[name](**kwargs)
         except KeyError as exc:
             raise ValueError(f"Unknown storage adapter: {name}") from exc
+
+
+class RenderedPageCacheFactory:
+    _registry: Dict[str, Callable[..., RenderedPageCachePort]] = {}
+
+    @classmethod
+    def register(cls, name: str):
+        def deco(builder: Callable[..., RenderedPageCachePort]):
+            cls._registry[name] = builder
+            return builder
+        return deco
+
+    @classmethod
+    def create(cls, name: str, **kwargs: Any) -> RenderedPageCachePort:
+        try:
+            return cls._registry[name](**kwargs)
+        except KeyError as exc:
+            raise ValueError(f"Unknown rendered page cache adapter: {name}") from exc
+
+
+class TaskQueueFactory:
+    _registry: Dict[str, Callable[..., TaskQueuePort]] = {}
+
+    @classmethod
+    def register(cls, name: str):
+        def deco(builder: Callable[..., TaskQueuePort]):
+            cls._registry[name] = builder
+            return builder
+        return deco
+
+    @classmethod
+    def create(cls, name: str, **kwargs: Any) -> TaskQueuePort:
+        try:
+            return cls._registry[name](**kwargs)
+        except KeyError as exc:
+            raise ValueError(f"Unknown task queue adapter: {name}") from exc

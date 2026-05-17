@@ -6,8 +6,10 @@ from .analytics_service import AnalyticsService
 from .document_processor import (
     DocumentProcessor,
     DocumentProcessingError,
+    PdfPreview,
     ProcessedDocument,
     ProcessingContext,
+    RenderedPage,
     ViewPolicy,
 )
 from .document_group_service import DocumentGroupService
@@ -23,8 +25,10 @@ __all__ = [
     "DocumentGroupService",
     "DocumentService",
     "LinkService",
+    "PdfPreview",
     "ProcessedDocument",
     "ProcessingContext",
+    "RenderedPage",
     "UploadService",
     "ViewPolicy",
     "ViewSessionDelivery",

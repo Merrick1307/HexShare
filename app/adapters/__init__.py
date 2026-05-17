@@ -18,6 +18,8 @@ from .iam import HexIAMPolicyClient
 from .persistence import PostgresStorage, MemoryStorage
 from .authz import HexIAMAuthorizer
 from .object_storage import S3ObjectStorageAdapter, CloudFlareR2ObjectStorageAdapter, CloudinaryObjectStorageAdapter
+from .cache import InMemoryRenderedPageCache, RedisRenderedPageCache
+from .queue import NoopTaskQueue, ArqTaskQueue
 
 
 __all__ = [
@@ -33,5 +35,9 @@ __all__ = [
     "PDPAccessControl",
     "S3ObjectStorageAdapter",
     "CloudFlareR2ObjectStorageAdapter",
-    "CloudinaryObjectStorageAdapter"
+    "CloudinaryObjectStorageAdapter",
+    "InMemoryRenderedPageCache",
+    "RedisRenderedPageCache",
+    "NoopTaskQueue",
+    "ArqTaskQueue",
 ]

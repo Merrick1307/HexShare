@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
+
 import pytest
+from PIL import Image
 
 from app.services.document_processor import DocumentProcessingError, DocumentProcessor, ProcessingContext
 
@@ -17,69 +20,140 @@ def _context(*, filename: str, source_media_type: str, watermark_text: str | Non
 
 
 @pytest.mark.asyncio
-async def test_process_for_view_passes_pdf_through():
+async def test_process_for_view_requires_page_image_mode_for_pdf():
     processor = DocumentProcessor()
 
-    result = await processor.process_for_view(
-        context=_context(filename="report.pdf", source_media_type="application/pdf"),
-        content=b"%PDF-1.7",
-    )
-
-    assert result.content == b"%PDF-1.7"
-    assert result.media_type == "application/pdf"
-    assert result.processing_applied is False
+    with pytest.raises(DocumentProcessingError, match="page_image_view_required"):
+        await processor.process_for_view(
+            context=_context(filename="report.pdf", source_media_type="application/pdf"),
+            content=b"%PDF-1.7",
+        )
 
 
 @pytest.mark.asyncio
-async def test_process_for_view_watermarks_pdf_when_backend_is_available(monkeypatch):
+async def test_describe_pdf_preview_reports_page_count(monkeypatch):
     processor = DocumentProcessor()
 
-    class FakePage:
-        def __init__(self) -> None:
-            self.width = 600.0
-            self.height = 800.0
-            self.calls: list[tuple[str, float, float, float]] = []
-
-        def add_text(self, text: str, x: float, y: float, font_size: float = 12.0) -> None:
-            self.calls.append((text, x, y, font_size))
-
     class FakePdfDocument:
-        saved_pages: list[FakePage] = []
-
-        def __init__(self, content: bytes) -> None:
-            self.content = content
-            self.pages = [FakePage(), FakePage()]
-
         @classmethod
         def from_bytes(cls, content: bytes):
-            return cls(content)
+            return cls()
 
         def page_count(self) -> int:
-            return len(self.pages)
-
-        def page(self, index: int) -> FakePage:
-            return self.pages[index]
-
-        def save_page(self, page: FakePage) -> None:
-            self.saved_pages.append(page)
-
-        def to_bytes(self) -> bytes:
-            return b"%PDF-watermarked"
+            return 3
 
     monkeypatch.setattr(processor, "_load_pdf_document_class", lambda: FakePdfDocument)
 
+    preview = await processor.describe_pdf_preview(content=b"%PDF-1.7")
+
+    assert preview.page_count == 3
+
+
+@pytest.mark.asyncio
+async def test_process_for_view_renders_image_as_png():
+    processor = DocumentProcessor()
+    image = Image.new("RGB", (120, 80), (255, 255, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
     result = await processor.process_for_view(
-        context=_context(filename="report.pdf", source_media_type="application/pdf"),
-        content=b"%PDF-1.7",
+        context=_context(filename="diagram.png", source_media_type="image/png"),
+        content=buffer.getvalue(),
     )
 
-    assert result.content == b"%PDF-watermarked"
-    assert result.media_type == "application/pdf"
+    assert result.media_type == "image/png"
     assert result.processing_applied is True
-    assert len(FakePdfDocument.saved_pages) == 2
-    for page in FakePdfDocument.saved_pages:
-        assert page.calls
-        assert page.calls[0][0] == "HexShare - viewer@example.com"
+    output = Image.open(io.BytesIO(result.content))
+    assert output.size == (120, 80)
+
+
+@pytest.mark.asyncio
+async def test_render_pdf_page_returns_watermarked_png(monkeypatch):
+    processor = DocumentProcessor()
+
+    class FakePage:
+        width = 612.0
+        height = 792.0
+
+    class FakePdfDocument:
+        @classmethod
+        def from_bytes(cls, content: bytes):
+            return cls()
+
+        def page_count(self) -> int:
+            return 2
+
+        def page(self, index: int) -> FakePage:
+            return FakePage()
+
+        def render_page_fit(self, page: int, width: int, height: int, **kwargs) -> bytes:
+            image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            return buffer.getvalue()
+
+    monkeypatch.setattr(processor, "_load_pdf_document_class", lambda: FakePdfDocument)
+
+    result = await processor.render_pdf_page(
+        context=_context(filename="report.pdf", source_media_type="application/pdf"),
+        content=b"%PDF-1.7",
+        page_number=1,
+        render_width=1000,
+    )
+
+    assert result.media_type == "image/png"
+    assert result.page_number == 1
+    assert result.total_pages == 2
+    assert result.width == 1000
+    assert result.height > 1000
+    output = Image.open(io.BytesIO(result.content)).convert("RGBA")
+    assert output.size == (result.width, result.height)
+    assert output.getbbox() is not None
+
+
+@pytest.mark.asyncio
+async def test_render_pdf_page_rejects_out_of_range_pages(monkeypatch):
+    processor = DocumentProcessor()
+
+    class FakePage:
+        width = 612.0
+        height = 792.0
+
+    class FakePdfDocument:
+        @classmethod
+        def from_bytes(cls, content: bytes):
+            return cls()
+
+        def page_count(self) -> int:
+            return 1
+
+        def page(self, index: int) -> FakePage:
+            return FakePage()
+
+    monkeypatch.setattr(processor, "_load_pdf_document_class", lambda: FakePdfDocument)
+
+    with pytest.raises(DocumentProcessingError, match="page_out_of_range"):
+        await processor.render_pdf_page(
+            context=_context(filename="report.pdf", source_media_type="application/pdf"),
+            content=b"%PDF-1.7",
+            page_number=2,
+        )
+
+
+def test_build_diagonal_watermark_overlay_matches_page_dimensions():
+    processor = DocumentProcessor()
+    ImageModule, ImageDraw, ImageFont = processor._load_pillow_modules()
+
+    overlay = processor._build_diagonal_watermark_overlay(
+        width=1200,
+        height=1600,
+        watermark_text="HexShare - viewer@example.com",
+        Image=ImageModule,
+        ImageDraw=ImageDraw,
+        ImageFont=ImageFont,
+    )
+
+    assert overlay.size == (1200, 1600)
 
 
 @pytest.mark.asyncio
@@ -165,3 +239,15 @@ def test_describe_view_policy_marks_code_as_inline_viewable():
 
     assert policy.inline_view_supported is True
     assert policy.view_kind == "code"
+
+
+def test_describe_view_policy_marks_images_as_inline_viewable():
+    processor = DocumentProcessor()
+
+    policy = processor.describe_view_policy(
+        filename="diagram.png",
+        source_media_type="image/png",
+    )
+
+    assert policy.inline_view_supported is True
+    assert policy.view_kind == "image"

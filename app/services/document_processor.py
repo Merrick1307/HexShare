@@ -59,14 +59,20 @@ class RenderedPage:
     height: int
 
 
+@dataclass
+class _CachedPdfDocument:
+    document: object
+    lock: asyncio.Lock
+
+
 class _PdfDocumentCache:
     def __init__(self, *, maxsize: int = 20, ttl_seconds: float = 300.0) -> None:
-        self._cache: OrderedDict[str, tuple[object, float]] = OrderedDict()
+        self._cache: OrderedDict[str, tuple[_CachedPdfDocument, float]] = OrderedDict()
         self._maxsize = maxsize
         self._ttl_seconds = ttl_seconds
         self._lock = asyncio.Lock()
 
-    async def get(self, key: str) -> object | None:
+    async def get(self, key: str) -> _CachedPdfDocument | None:
         async with self._lock:
             now = time.monotonic()
             entry = self._cache.get(key)
@@ -79,7 +85,7 @@ class _PdfDocumentCache:
             self._cache.move_to_end(key)
             return value
 
-    async def set(self, key: str, value: object) -> None:
+    async def set(self, key: str, value: _CachedPdfDocument) -> None:
         async with self._lock:
             self._cache[key] = (value, time.monotonic() + self._ttl_seconds)
             self._cache.move_to_end(key)
@@ -238,8 +244,10 @@ class DocumentProcessor:
         if PdfDocument is None:
             raise DocumentProcessingError("inline_view_backend_unavailable")
 
-        document = await self._get_pdf_document(content=content, cache_key=cache_key, PdfDocument=PdfDocument)
-        return PdfPreview(page_count=int(document.page_count()))
+        cached_document = await self._get_pdf_document(content=content, cache_key=cache_key, PdfDocument=PdfDocument)
+        async with cached_document.lock:
+            page_count = await asyncio.to_thread(self._get_pdf_page_count_sync, document=cached_document.document)
+        return PdfPreview(page_count=page_count)
 
     async def render_pdf_page(
         self,
@@ -259,23 +267,20 @@ class DocumentProcessor:
             raise DocumentProcessingError("inline_view_backend_unavailable")
 
         Image, ImageDraw, ImageFont = pillow_modules
-        document = await self._get_pdf_document(content=content, cache_key=cache_key, PdfDocument=PdfDocument)
-        total_pages = int(document.page_count())
-        if page_number > total_pages:
-            raise DocumentProcessingError("page_out_of_range")
+        cached_document = await self._get_pdf_document(content=content, cache_key=cache_key, PdfDocument=PdfDocument)
 
         target_width = self._clamp_render_width(render_width)
-        return await asyncio.to_thread(
-            self._render_pdf_page_sync,
-            document=document,
-            page_number=page_number,
-            total_pages=total_pages,
-            target_width=target_width,
-            watermark_text=context.watermark_text,
-            Image=Image,
-            ImageDraw=ImageDraw,
-            ImageFont=ImageFont,
-        )
+        async with cached_document.lock:
+            return await asyncio.to_thread(
+                self._render_pdf_page_sync,
+                document=cached_document.document,
+                page_number=page_number,
+                target_width=target_width,
+                watermark_text=context.watermark_text,
+                Image=Image,
+                ImageDraw=ImageDraw,
+                ImageFont=ImageFont,
+            )
 
     async def process_for_download(
         self,
@@ -442,22 +447,28 @@ class DocumentProcessor:
             if cached is not None:
                 return cached
         document = await asyncio.to_thread(PdfDocument.from_bytes, content)
+        cached_document = _CachedPdfDocument(document=document, lock=asyncio.Lock())
         if cache_key:
-            await self._pdf_cache.set(cache_key, document)
-        return document
+            await self._pdf_cache.set(cache_key, cached_document)
+        return cached_document
+
+    def _get_pdf_page_count_sync(self, *, document) -> int:
+        return int(document.page_count())
 
     def _render_pdf_page_sync(
         self,
         *,
         document,
         page_number: int,
-        total_pages: int,
         target_width: int,
         watermark_text: str | None,
         Image,
         ImageDraw,
         ImageFont,
     ) -> RenderedPage:
+        total_pages = int(document.page_count())
+        if page_number > total_pages:
+            raise DocumentProcessingError("page_out_of_range")
         zero_based_page = page_number - 1
         page = document.page(zero_based_page)
         target_height = self._calculate_target_height(

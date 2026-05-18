@@ -1,0 +1,163 @@
+services:
+  hexshare:
+    build: .
+    ports:
+      - "8099:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - HEXIAM_URL=${HEXIAM_URL}
+      - HEXIAM_PDP_URL=${HEXIAM_PDP_URL}
+      - HEXIAM_JWT_SECRET=${HEXIAM_JWT_SECRET}
+      - HEXSHARE_PDP_CLIENT_ID=${HEXSHARE_PDP_CLIENT_ID}
+      - HEXSHARE_PDP_CLIENT_SECRET=${HEXSHARE_PDP_CLIENT_SECRET}
+      - HEXSHARE_STORAGE=${HEXSHARE_STORAGE}
+      - HEXSHARE_IAM_POLICY=${HEXSHARE_IAM_POLICY}
+      - HEXSHARE_OBJECT_STORAGE=${HEXSHARE_OBJECT_STORAGE}
+      - HEXSHARE_OBJECT_BUCKET=${HEXSHARE_OBJECT_BUCKET}
+      - HEXSHARE_OBJECT_PREFIX=${HEXSHARE_OBJECT_PREFIX}
+      - HEXSHARE_VIEWER_STRATEGY=${HEXSHARE_VIEWER_STRATEGY}
+      - HEXSHARE_DOCUMENT_PROCESSING_ENABLED=${HEXSHARE_DOCUMENT_PROCESSING_ENABLED}
+      - HEXSHARE_RENDERED_PAGE_CACHE=${HEXSHARE_RENDERED_PAGE_CACHE}
+      - HEXSHARE_RENDERED_PAGE_CACHE_TTL=${HEXSHARE_RENDERED_PAGE_CACHE_TTL}
+      - HEXSHARE_RENDERED_PAGE_CACHE_PREFIX=${HEXSHARE_RENDERED_PAGE_CACHE_PREFIX}
+      - HEXSHARE_TASK_QUEUE=${HEXSHARE_TASK_QUEUE}
+      - REDIS_URL=${REDIS_URL}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+      - S3_PUBLIC_ENDPOINT_URL=${S3_PUBLIC_ENDPOINT_URL}
+      - S3_REGION=${S3_REGION}
+      - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+      - HEXSHARE_ACCESS_CONTROL=${HEXSHARE_ACCESS_CONTROL}
+      - HEXSHARE_AUTHENTICATOR=${HEXSHARE_AUTHENTICATOR}
+      - HEXSHARE_POLICY_EVAL=${HEXSHARE_POLICY_EVAL}
+      - HEXSHARE_EVENT_BUS=${HEXSHARE_EVENT_BUS}
+      - HEXSHARE_JWT_SECRET=${HEXSHARE_JWT_SECRET}
+      - HEXSHARE_SESSION_SECRET=${HEXSHARE_SESSION_SECRET}
+      - HEXSHARE_API_WORKERS=${HEXSHARE_API_WORKERS}
+      - HEXSHARE_PUBLIC_URL=${HEXSHARE_PUBLIC_URL}
+      - HEXSHARE_FRONTEND_URL=${HEXSHARE_FRONTEND_URL}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+
+    volumes:
+      - ./app:/app/app
+
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+    deploy:
+      replicas: ${HEXSHARE_API_REPLICAS:-1}
+
+  hexshare-worker:
+    build: .
+    entrypoint: ["arq", "app.workers.prerender_worker.WorkerSettings"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - HEXIAM_URL=${HEXIAM_URL}
+      - HEXIAM_PDP_URL=${HEXIAM_PDP_URL}
+      - HEXIAM_JWT_SECRET=${HEXIAM_JWT_SECRET}
+      - HEXSHARE_PDP_CLIENT_ID=${HEXSHARE_PDP_CLIENT_ID}
+      - HEXSHARE_PDP_CLIENT_SECRET=${HEXSHARE_PDP_CLIENT_SECRET}
+      - HEXSHARE_STORAGE=${HEXSHARE_STORAGE}
+      - HEXSHARE_IAM_POLICY=${HEXSHARE_IAM_POLICY}
+      - HEXSHARE_OBJECT_STORAGE=${HEXSHARE_OBJECT_STORAGE}
+      - HEXSHARE_OBJECT_BUCKET=${HEXSHARE_OBJECT_BUCKET}
+      - HEXSHARE_OBJECT_PREFIX=${HEXSHARE_OBJECT_PREFIX}
+      - HEXSHARE_VIEWER_STRATEGY=${HEXSHARE_VIEWER_STRATEGY}
+      - HEXSHARE_DOCUMENT_PROCESSING_ENABLED=${HEXSHARE_DOCUMENT_PROCESSING_ENABLED}
+      - HEXSHARE_RENDERED_PAGE_CACHE=${HEXSHARE_RENDERED_PAGE_CACHE}
+      - HEXSHARE_RENDERED_PAGE_CACHE_TTL=${HEXSHARE_RENDERED_PAGE_CACHE_TTL}
+      - HEXSHARE_RENDERED_PAGE_CACHE_PREFIX=${HEXSHARE_RENDERED_PAGE_CACHE_PREFIX}
+      - HEXSHARE_TASK_QUEUE=${HEXSHARE_TASK_QUEUE}
+      - HEXSHARE_ARQ_MAX_JOBS=${HEXSHARE_ARQ_MAX_JOBS}
+      - HEXSHARE_ARQ_JOB_TIMEOUT_SECONDS=${HEXSHARE_ARQ_JOB_TIMEOUT_SECONDS}
+      - REDIS_URL=${REDIS_URL}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+      - S3_PUBLIC_ENDPOINT_URL=${S3_PUBLIC_ENDPOINT_URL}
+      - S3_REGION=${S3_REGION}
+      - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+      - HEXSHARE_ACCESS_CONTROL=${HEXSHARE_ACCESS_CONTROL}
+      - HEXSHARE_AUTHENTICATOR=${HEXSHARE_AUTHENTICATOR}
+      - HEXSHARE_POLICY_EVAL=${HEXSHARE_POLICY_EVAL}
+      - HEXSHARE_EVENT_BUS=${HEXSHARE_EVENT_BUS}
+      - HEXSHARE_JWT_SECRET=${HEXSHARE_JWT_SECRET}
+      - HEXSHARE_SESSION_SECRET=${HEXSHARE_SESSION_SECRET}
+      - HEXSHARE_PUBLIC_URL=${HEXSHARE_PUBLIC_URL}
+      - HEXSHARE_FRONTEND_URL=${HEXSHARE_FRONTEND_URL}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-create-bucket:
+        condition: service_completed_successfully
+    deploy:
+      replicas: ${HEXSHARE_WORKER_REPLICAS:-1}
+
+  hexshare-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.local
+    ports:
+      - "3000:3003"
+    environment:
+      - HEXSHARE_PUBLIC_URL=${HEXSHARE_PUBLIC_URL}
+      - HEXSHARE_FRONTEND_URL=${HEXSHARE_FRONTEND_URL}
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5442:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${AWS_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${AWS_SECRET_ACCESS_KEY}
+      - MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3003,http://127.0.0.1:3003
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-create-bucket:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY}; do sleep 1; done &&
+      /usr/bin/mc mb --ignore-existing local/${HEXSHARE_OBJECT_BUCKET}
+      "
+
+volumes:
+  postgres_data:
+  minio_data:

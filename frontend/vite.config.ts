@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts: ['hexshare.hexalgon.site', 'localhost', '127.0.0.1', '0.0.0.0'],
       proxy: {
         '/api': {
-          target: env.VITE_API_PROXY_TARGET || 'http://host.docker.internal:8000',
+          target: env.VITE_API_PROXY_TARGET || 'http://hexshare:8000',
           changeOrigin: true,
         },
       },

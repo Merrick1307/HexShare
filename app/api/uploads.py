@@ -26,13 +26,18 @@ async def initiate_upload(
     principal: TenantPrincipal = Depends(get_tenant_auth()),
     upload_service: UploadService = Depends(get_upload_service),
 ) -> InitiateUploadResponse:
-    initiated = await upload_service.initiate_upload(
-        tenant_id=principal.tenant_id,
-        filename=payload.filename,
-        content_type=payload.content_type,
-        size=payload.size,
-        expires_in=payload.expires_in,
-    )
+    try:
+        initiated = await upload_service.initiate_upload(
+            tenant_id=principal.tenant_id,
+            filename=payload.filename,
+            content_type=payload.content_type,
+            size=payload.size,
+            expires_in=payload.expires_in,
+        )
+    except ValueError as exc:
+        if str(exc) == "upload_size_exceeded":
+            raise HTTPException(status_code=413, detail="File size exceeds the maximum allowed")
+        raise
     return InitiateUploadResponse(
         document_id=initiated.document_id,
         object_key=initiated.object_key,
@@ -67,6 +72,8 @@ async def complete_upload(
             raise HTTPException(status_code=409, detail="Document already finalized")
         if detail == "object_not_found":
             raise HTTPException(status_code=404, detail="Uploaded object not found")
+        if detail == "upload_size_exceeded":
+            raise HTTPException(status_code=413, detail="File size exceeds the maximum allowed")
         if detail in {"object_size_mismatch", "object_etag_mismatch"}:
             raise HTTPException(status_code=400, detail=detail)
         raise HTTPException(status_code=400, detail="Upload completion failed")

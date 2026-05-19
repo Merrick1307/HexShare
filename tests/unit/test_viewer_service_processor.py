@@ -300,12 +300,22 @@ async def test_render_document_page_uses_processor_and_records_page_view():
     class _StorageStub:
         def __init__(self) -> None:
             self.events = []
+            self.latest_page_view = None
+            self.updated_durations: list[tuple[str, int]] = []
 
         def generate_id(self, prefix: str) -> str:
             return f"{prefix}_1"
 
         async def save_view_event(self, event) -> None:
             self.events.append(event)
+            if getattr(event, "event_type", None) == "page_view":
+                self.latest_page_view = event
+
+        async def get_latest_page_view_event(self, *, tenant_id: str, visitor_session_id: str):
+            return self.latest_page_view
+
+        async def update_view_event_duration(self, *, tenant_id: str, event_id: str, duration_ms: int) -> None:
+            self.updated_durations.append((event_id, duration_ms))
 
     storage = _StorageStub()
     processor = _ProcessorSpy()
@@ -352,12 +362,22 @@ async def test_render_document_page_uses_rendered_page_cache_for_repeated_page_r
     class _StorageStub:
         def __init__(self) -> None:
             self.events = []
+            self.latest_page_view = None
+            self.updated_durations: list[tuple[str, int]] = []
 
         def generate_id(self, prefix: str) -> str:
             return f"{prefix}_1"
 
         async def save_view_event(self, event) -> None:
             self.events.append(event)
+            if getattr(event, "event_type", None) == "page_view":
+                self.latest_page_view = event
+
+        async def get_latest_page_view_event(self, *, tenant_id: str, visitor_session_id: str):
+            return self.latest_page_view
+
+        async def update_view_event_duration(self, *, tenant_id: str, event_id: str, duration_ms: int) -> None:
+            self.updated_durations.append((event_id, duration_ms))
 
     storage = _StorageStub()
     processor = _ProcessorSpy()
@@ -399,12 +419,22 @@ async def test_record_page_view_saves_page_view_event():
     class _StorageStub:
         def __init__(self) -> None:
             self.events = []
+            self.latest_page_view = None
+            self.updated_durations: list[tuple[str, int]] = []
 
         def generate_id(self, prefix: str) -> str:
             return f"{prefix}_1"
 
         async def save_view_event(self, event) -> None:
             self.events.append(event)
+            if getattr(event, "event_type", None) == "page_view":
+                self.latest_page_view = event
+
+        async def get_latest_page_view_event(self, *, tenant_id: str, visitor_session_id: str):
+            return self.latest_page_view
+
+        async def update_view_event_duration(self, *, tenant_id: str, event_id: str, duration_ms: int) -> None:
+            self.updated_durations.append((event_id, duration_ms))
 
     storage = _StorageStub()
     processor = _ProcessorSpy()
@@ -429,6 +459,66 @@ async def test_record_page_view_saves_page_view_event():
 
     assert len(storage.events) == 1
     assert storage.events[0].page_number == 5
+    assert storage.events[0].duration_ms is None
+
+
+@pytest.mark.asyncio
+async def test_record_page_view_updates_previous_page_duration():
+    object_storage = _ObjectStorageStub()
+
+    class _StorageStub:
+        def __init__(self) -> None:
+            self.events = []
+            self.latest_page_view = type(
+                "PageViewEventStub",
+                (),
+                {
+                    "id": "evt_prev",
+                    "timestamp": datetime(2026, 5, 16, 12, 0, 0),
+                    "duration_ms": None,
+                },
+            )()
+            self.updated_durations: list[tuple[str, int]] = []
+
+        def generate_id(self, prefix: str) -> str:
+            return f"{prefix}_1"
+
+        async def save_view_event(self, event) -> None:
+            self.events.append(event)
+            self.latest_page_view = event
+
+        async def get_latest_page_view_event(self, *, tenant_id: str, visitor_session_id: str):
+            return self.latest_page_view
+
+        async def update_view_event_duration(self, *, tenant_id: str, event_id: str, duration_ms: int) -> None:
+            self.updated_durations.append((event_id, duration_ms))
+
+    storage = _StorageStub()
+    processor = _ProcessorSpy()
+    service = ViewerService(
+        storage=storage,  # type: ignore[arg-type]
+        object_storage=object_storage,
+        rendered_page_cache=_RenderedPageCacheStub(),
+        task_queue=_TaskQueueStub(),
+        document_processor=processor,
+        document_service=None,  # type: ignore[arg-type]
+        link_service=None,  # type: ignore[arg-type]
+    )
+
+    active = _resolved_session(email="viewer@example.com")
+
+    async def fake_ensure(*, tenant_id: str, session_id: str):
+        return active
+
+    service.ensure_active_session = fake_ensure  # type: ignore[method-assign]
+    service._now = staticmethod(lambda: datetime(2026, 5, 16, 12, 0, 4))  # type: ignore[method-assign]
+
+    await service.record_page_view(tenant_id="tenant-1", session_id="vs_1", page_number=5)
+
+    assert storage.updated_durations == [("evt_prev", 4000)]
+    assert len(storage.events) == 1
+    assert storage.events[0].page_number == 5
+    assert storage.events[0].duration_ms is None
 
 
 @pytest.mark.asyncio
@@ -440,6 +530,12 @@ async def test_record_page_view_enqueues_next_page_job():
             return f"{prefix}_1"
 
         async def save_view_event(self, event) -> None:
+            return None
+
+        async def get_latest_page_view_event(self, *, tenant_id: str, visitor_session_id: str):
+            return None
+
+        async def update_view_event_duration(self, *, tenant_id: str, event_id: str, duration_ms: int) -> None:
             return None
 
     queue = _TaskQueueStub()
@@ -463,3 +559,64 @@ async def test_record_page_view_enqueues_next_page_job():
     await service.record_page_view(tenant_id="tenant-1", session_id="vs_1", page_number=5)
 
     assert queue.jobs == [("vs_1", 6, None)]
+
+
+@pytest.mark.asyncio
+async def test_close_session_updates_last_page_duration_before_closing():
+    object_storage = _ObjectStorageStub()
+
+    class _StorageStub:
+        def __init__(self) -> None:
+            self.ended = []
+            self.saved_events = []
+            self.updated_durations: list[tuple[str, int]] = []
+            self.latest_page_view = type(
+                "PageViewEventStub",
+                (),
+                {
+                    "id": "evt_prev",
+                    "timestamp": datetime(2026, 5, 16, 12, 0, 0),
+                    "duration_ms": None,
+                },
+            )()
+
+        def generate_id(self, prefix: str) -> str:
+            return f"{prefix}_1"
+
+        async def get_latest_page_view_event(self, *, tenant_id: str, visitor_session_id: str):
+            return self.latest_page_view
+
+        async def update_view_event_duration(self, *, tenant_id: str, event_id: str, duration_ms: int) -> None:
+            self.updated_durations.append((event_id, duration_ms))
+
+        async def end_visitor_session(self, *, tenant_id: str, session_id: str, ended_at: datetime) -> None:
+            self.ended.append((tenant_id, session_id, ended_at))
+
+        async def save_view_event(self, event) -> None:
+            self.saved_events.append(event)
+
+    storage = _StorageStub()
+    service = ViewerService(
+        storage=storage,  # type: ignore[arg-type]
+        object_storage=object_storage,
+        rendered_page_cache=_RenderedPageCacheStub(),
+        task_queue=_TaskQueueStub(),
+        document_processor=_ProcessorSpy(),
+        document_service=None,  # type: ignore[arg-type]
+        link_service=None,  # type: ignore[arg-type]
+    )
+
+    active = _resolved_session(email="viewer@example.com")
+
+    async def fake_resolve(*, tenant_id: str, session_id: str):
+        return active
+
+    service.resolve_view_session_for_tenant = fake_resolve  # type: ignore[method-assign]
+    service._now = staticmethod(lambda: datetime(2026, 5, 16, 12, 0, 7))  # type: ignore[method-assign]
+
+    await service.close_session(tenant_id="tenant-1", session_id="vs_1")
+
+    assert storage.updated_durations == [("evt_prev", 7000)]
+    assert len(storage.ended) == 1
+    assert len(storage.saved_events) == 1
+    assert storage.saved_events[0].event_type.value == "close"

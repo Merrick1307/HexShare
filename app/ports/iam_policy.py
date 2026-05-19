@@ -50,3 +50,13 @@ class IAMPolicyPort(ABC):
         policy_id: str,
     ) -> None:
         """Revoke a previously-granted policy from ``user_id``."""
+
+    async def list_tenant_users(
+        self,
+        *,
+        tenant_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError("Listing tenant users is not supported by this IAM policy adapter")

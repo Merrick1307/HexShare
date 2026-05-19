@@ -130,6 +130,11 @@ class ViewerService:
             download=download,
         )
 
+    @staticmethod
+    def _duration_ms(*, started_at: datetime, ended_at: datetime) -> int:
+        delta = ended_at - started_at
+        return max(int(delta.total_seconds() * 1000), 0)
+
     async def inspect_share_token(self, *, tenant_id: str, document_id: str, link_id: str) -> dict:
         link = await self._link_service.get_share_link(tenant_id=tenant_id, link_id=link_id)
         document = await self._document_service.get_document(tenant_id=tenant_id, document_id=document_id)
@@ -191,19 +196,6 @@ class ViewerService:
                 share_link_id=link.id,
                 visitor_session_id=session.id,
                 event_type=EventType.OPEN,
-                timestamp=self._now(),
-            )
-        )
-        await self._storage.save_view_event(
-            ViewEvent(
-                id=self._storage.generate_id("evt"),
-                tenant_id=tenant_id,
-                document_id=document.id,
-                share_link_id=link.id,
-                visitor_session_id=session.id,
-                event_type=EventType.PAGE_VIEW,
-                page_number=1,
-                duration_ms=0,
                 timestamp=self._now(),
             )
         )
@@ -284,6 +276,20 @@ class ViewerService:
         page_number: int,
     ) -> None:
         resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
+        now = self._now()
+        previous_page_view = await self._storage.get_latest_page_view_event(
+            tenant_id=tenant_id,
+            visitor_session_id=session_id,
+        )
+        if previous_page_view and previous_page_view.duration_ms is None:
+            await self._storage.update_view_event_duration(
+                tenant_id=tenant_id,
+                event_id=previous_page_view.id,
+                duration_ms=self._duration_ms(
+                    started_at=previous_page_view.timestamp,
+                    ended_at=now,
+                ),
+            )
         await self._storage.save_view_event(
             ViewEvent(
                 id=self._storage.generate_id("evt"),
@@ -293,8 +299,8 @@ class ViewerService:
                 visitor_session_id=session_id,
                 event_type=EventType.PAGE_VIEW,
                 page_number=page_number,
-                duration_ms=0,
-                timestamp=self._now(),
+                duration_ms=None,
+                timestamp=now,
             )
         )
         # Fire-and-forget hook for async pre-render worker pipelines.
@@ -312,6 +318,19 @@ class ViewerService:
         resolved = await self.resolve_view_session_for_tenant(tenant_id=tenant_id, session_id=session_id)
         if resolved.session.ended_at is None:
             ended_at = self._now()
+            previous_page_view = await self._storage.get_latest_page_view_event(
+                tenant_id=tenant_id,
+                visitor_session_id=session_id,
+            )
+            if previous_page_view and previous_page_view.duration_ms is None:
+                await self._storage.update_view_event_duration(
+                    tenant_id=tenant_id,
+                    event_id=previous_page_view.id,
+                    duration_ms=self._duration_ms(
+                        started_at=previous_page_view.timestamp,
+                        ended_at=ended_at,
+                    ),
+                )
             await self._storage.end_visitor_session(tenant_id=tenant_id, session_id=session_id, ended_at=ended_at)
             await self._storage.save_view_event(
                 ViewEvent(

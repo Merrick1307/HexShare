@@ -133,6 +133,7 @@ class DocumentGroupService:
             policy_id=policy_id,
             resource=group_id,
             actions=bitmask_to_action_names(_OWNER_GROUP_BITMASK),
+            conditions={"granted_by": principal.user_id},
         )
 
         group = DocumentGroup(
@@ -272,6 +273,7 @@ class DocumentGroupService:
             policy_id=policy_id,
             resource=group_id,
             actions=bitmask_to_action_names(bitmask),
+            conditions={"granted_by": principal.user_id},
         )
 
     async def remove_member(

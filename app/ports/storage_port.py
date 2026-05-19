@@ -85,6 +85,12 @@ class StoragePort(ABC):
         """Mark a visitor session as ended."""
 
     @abstractmethod
+    async def list_visitor_sessions(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[VisitorSession]:
+        """List visitor sessions for a specific document."""
+
+    @abstractmethod
     async def save_view_event(self, event: ViewEvent) -> None:
         """Persist a view event."""
 
@@ -93,6 +99,18 @@ class StoragePort(ABC):
         self, *, tenant_id: str, document_id: str
     ) -> Iterable[ViewEvent]:
         """List view events for a specific document."""
+
+    @abstractmethod
+    async def get_latest_page_view_event(
+        self, *, tenant_id: str, visitor_session_id: str
+    ) -> Optional[ViewEvent]:
+        """Return the latest page-view event for a visitor session."""
+
+    @abstractmethod
+    async def update_view_event_duration(
+        self, *, tenant_id: str, event_id: str, duration_ms: int
+    ) -> None:
+        """Persist a computed duration for an existing view event."""
 
     @abstractmethod
     async def save_document_permission(self, permission: DocumentPermission) -> None:

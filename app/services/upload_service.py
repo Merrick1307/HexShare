@@ -31,10 +31,12 @@ class UploadService:
         metadata_storage: StoragePort,
         object_storage: ObjectStoragePort,
         document_service: DocumentService,
+        max_size_bytes: int | None = None,
     ) -> None:
         self._metadata_storage = metadata_storage
         self._object_storage = object_storage
         self._document_service = document_service
+        self._max_size_bytes = max_size_bytes
 
     async def initiate_upload(
         self,
@@ -45,6 +47,8 @@ class UploadService:
         size: int,
         expires_in: int = 900,
     ) -> UploadInitiation:
+        if self._max_size_bytes is not None and size > self._max_size_bytes:
+            raise ValueError("upload_size_exceeded")
         document_id = self._metadata_storage.generate_id("doc")
         object_key = self._object_storage.build_object_key(
             tenant_id=tenant_id,
@@ -74,6 +78,8 @@ class UploadService:
         created_by: str,
         expected_etag: str | None = None,
     ) -> Document:
+        if self._max_size_bytes is not None and size > self._max_size_bytes:
+            raise ValueError("upload_size_exceeded")
         existing = await self._document_service.get_document(
             tenant_id=tenant_id,
             document_id=document_id,

@@ -1,4 +1,4 @@
-import { Document, DocumentAnalytics, DocumentGroup, ShareInspection, ShareLink, ViewSession } from '../types';
+import { Document, DocumentAnalytics, DocumentGroup, PaginatedResponse, ShareInspection, ShareLink, ViewSession } from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_APP_URL || '').replace(/\/$/, '');
 const API_PREFIX = `${API_BASE_URL}/api/v1`;
@@ -138,8 +138,8 @@ export const api = {
   toAbsoluteApiUrl,
   toAbsoluteFrontendUrl,
 
-  async listDocuments(): Promise<Document[]> {
-    return fetchWithAuth<Document[]>(`${API_PREFIX}/documents`);
+  async listDocuments(offset = 0, limit = 20): Promise<PaginatedResponse<Document>> {
+    return fetchWithAuth<PaginatedResponse<Document>>(`${API_PREFIX}/documents?offset=${offset}&limit=${limit}`);
   },
 
   async getDocument(documentId: string): Promise<Document> {
@@ -213,9 +213,11 @@ export const api = {
     await parseResponse(response);
   },
 
-  async listLinks(documentId?: string): Promise<ShareLink[]> {
-    const url = documentId ? `${API_PREFIX}/documents/${documentId}/links` : `${API_PREFIX}/links`;
-    return fetchWithAuth<ShareLink[]>(url);
+  async listLinks(documentId?: string, offset = 0, limit = 20): Promise<PaginatedResponse<ShareLink>> {
+    const url = documentId
+      ? `${API_PREFIX}/documents/${documentId}/links?offset=${offset}&limit=${limit}`
+      : `${API_PREFIX}/links?offset=${offset}&limit=${limit}`;
+    return fetchWithAuth<PaginatedResponse<ShareLink>>(url);
   },
 
   async createLink(
@@ -288,8 +290,8 @@ export const api = {
     await fetchPublic<void>(`${API_PREFIX}/view-sessions/${sessionId}/close`, { method: 'POST' });
   },
 
-  async listGroups(): Promise<DocumentGroup[]> {
-    return fetchWithAuth<DocumentGroup[]>(`${API_PREFIX}/document-groups`);
+  async listGroups(offset = 0, limit = 20): Promise<PaginatedResponse<DocumentGroup>> {
+    return fetchWithAuth<PaginatedResponse<DocumentGroup>>(`${API_PREFIX}/document-groups?offset=${offset}&limit=${limit}`);
   },
 
   async createGroup(data: { name: string; description?: string }): Promise<DocumentGroup> {

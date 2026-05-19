@@ -143,4 +143,5 @@ class HexIAMPolicyClient(IAMPolicyPort):
 
 @IAMPolicyFactory.register("hexiam")
 def create_hexiam_policy_client(**kwargs) -> IAMPolicyPort:
+    kwargs.pop("pool", None)
     return HexIAMPolicyClient(**kwargs)

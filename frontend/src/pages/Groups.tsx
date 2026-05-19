@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Folder, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -8,9 +8,21 @@ import { DocumentGroup } from '../types';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 
 export function Groups() {
-  const [groups, setGroups] = useState<DocumentGroup[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const {
+    items: groups,
+    total: groupsTotal,
+    isLoading: groupsLoading,
+    sentinelRef: groupsSentinelRef,
+    reset: resetGroups,
+  } = useInfiniteScroll<DocumentGroup>({
+    fetchFn: (offset, limit) => api.listGroups(offset, limit),
+    pageSize: 20,
+    rootRef: containerRef,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -20,6 +32,18 @@ export function Groups() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<DocumentGroup | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [openMenuId]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({ name: '', description: '' });
@@ -28,14 +52,13 @@ export function Groups() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.listGroups();
-      setGroups(data);
+      resetGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load groups');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [resetGroups]);
 
   useEffect(() => {
     void loadGroups();
@@ -132,9 +155,9 @@ export function Groups() {
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="overflow-visible rounded-xl border border-zinc-200 bg-white shadow-sm">
+      <div ref={containerRef} className="overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-sm max-h-[calc(100vh-16rem)]">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
+          <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
             <tr>
               <th className="px-6 py-4">Name</th>
               <th className="px-6 py-4">Description</th>
@@ -143,7 +166,7 @@ export function Groups() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200">
-            {isLoading ? (
+            {isLoading && groups.length === 0 ? (
               <tr><td colSpan={4} className="px-6 py-8 text-center text-zinc-500">Loading groups...</td></tr>
             ) : groups.length === 0 ? (
               <tr>
@@ -171,7 +194,7 @@ export function Groups() {
                   <td className="px-6 py-4 text-zinc-600">{group.description || <span className="text-zinc-400">—</span>}</td>
                   <td className="px-6 py-4 text-zinc-600">{format(new Date(group.created_at), 'MMM d, yyyy')}</td>
                   <td className="relative overflow-visible px-6 py-4 text-right">
-                    <div className="relative inline-block text-left">
+                    <div ref={menuRef} className="relative inline-block text-left">
                       <Button type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setOpenMenuId(openMenuId === group.id ? null : group.id)}>
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
@@ -192,6 +215,10 @@ export function Groups() {
             )}
           </tbody>
         </table>
+        <div ref={groupsSentinelRef} className="h-1" />
+        {groupsLoading && groups.length > 0 ? (
+          <div className="px-6 py-3 text-center text-sm text-zinc-400">Loading more groups...</div>
+        ) : null}
       </div>
 
       <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create Group">

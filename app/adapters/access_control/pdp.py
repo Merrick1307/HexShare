@@ -75,19 +75,23 @@ class PDPAccessControl(AccessControlPort):
         )
 
 
-def _load_pdp_config():
-    iam_url = "http://host.docker.internal:8000"
-    client_id = os.getenv("HEXSHARE_CLIENT_ID")
-    client_secret = os.getenv("HEXIAM_CLIENT_SECRET")
+def _load_pdp_config(*, iam_url=None, client_id=None, client_secret=None):
+    resolved_iam_url = iam_url or os.getenv("HEXIAM_PDP_URL") or os.getenv("HEXIAM_URL", "http://host.docker.internal:8000")
+    resolved_client_id = client_id or os.getenv("HEXSHARE_PDP_CLIENT_ID") or os.getenv("HEXSHARE_CLIENT_ID")
+    resolved_client_secret = client_secret or os.getenv("HEXSHARE_PDP_CLIENT_SECRET") or os.getenv("HEXSHARE_CLIENT_SECRET")
     timeout_s = float(os.getenv("HEXIAM_PDP_TIMEOUT_S", 5.0))
     return {
-        "iam_url": iam_url,
-        "client_id": client_id,
-        "client_secret": client_secret,
+        "iam_url": resolved_iam_url,
+        "client_id": resolved_client_id,
+        "client_secret": resolved_client_secret,
         "timeout_s": timeout_s,
     }
 
 @AccessControlFactory.register("pdp")
 def create_pdp_access_control(*, iam_url=None, client_id=None, client_secret=None, **_) -> AccessControlPort:
-    config = _load_pdp_config()
+    config = _load_pdp_config(
+        iam_url=iam_url,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
     return PDPAccessControl(**config)

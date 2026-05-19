@@ -83,6 +83,9 @@ docker compose -f docker-compose.yaml -f docker-compose.with-hexiam.yaml up -d -
 - Architecture and runtime layout: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Self-hosting steps: [SELF_HOST.md](SELF_HOST.md)
 - Change history: [CHANGELOG.md](CHANGELOG.md)
+- License: [LICENSE.md](LICENSE.md)
+- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
 
 ## Notes
 

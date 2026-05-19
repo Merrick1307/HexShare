@@ -25,16 +25,14 @@
 13. [Repository Architecture](#13-repository-architecture)
 14. [Hexagonal Architecture Explained](#14-hexagonal-architecture-explained)
 15. [Runtime & Infrastructure](#15-runtime--infrastructure)
-16. [V0.1 Readiness Assessment](#16-v01-readiness-assessment)
-17. [Positioning & Go-to-Market](#17-positioning--go-to-market)
 
 ---
 
 ## 1. Product Overview
 
-HexShare is a self-hostable secure document sharing platform that sits between lightweight link sharing and a full virtual data room. It is API-first, built on FastAPI and React, uses S3-compatible object storage for document bytes, and delegates identity plus policy evaluation to an OIDC-compliant identity provider.
+HexShare is a self-hostable secure document sharing platform that sits between lightweight link sharing and a full virtual data room. It is API-first, built on FastAPI and React, uses S3-compatible object storage for document bytes, and can run either against HexIAM-issued tokens or locally-issued HexShare session tokens derived from upstream OIDC login.
 
-The current implementation supports the core secure-delivery loop end to end: OIDC login, presigned uploads, share-link issuance, server-mediated viewing, page-level PDF rendering with watermarking, event logging, and background prerendering.
+The current implementation supports the core secure-delivery loop end to end: OIDC login, local session minting, presigned uploads, share-link issuance, server-mediated viewing, page-level PDF rendering with watermarking, event logging, background prerendering, and a compose-driven self-hosting path that can bundle HexIAM alongside the app.
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -45,6 +43,10 @@ The current implementation supports the core secure-delivery loop end to end: OI
 | PDF page rendering + watermarking | ✅ | `pdf_oxide` + Pillow, pixel-baked into each page image |
 | Background prerender worker | ✅ | Queue worker warms rendered page cache ahead of scroll |
 | Document groups backed by IAM policy | ✅ | Group access modeled as dynamic IAM resources |
+| Local session mode | ✅ | Upstream OIDC login can terminate into local HexShare access + refresh cookies |
+| Multiple OIDC client adapters | ✅ | HexIAM and Google clients are wired into startup selection |
+| Share-token JTI revocation store | ✅ | In-memory by default; Redis-backed adapter available for multi-instance deployments |
+| Bundled HexIAM self-host overlay | ✅ | `docker-compose.with-hexiam.yaml` + bootstrap script prepare a combined stack |
 | Upload metadata columns | ✅ | `upload_status`, `object_etag`, `checksum_sha256`, `uploaded_at` |
 | DOCX inline viewing | 🔜 | Currently download-only |
 | External-party identity model | 🔜 | Email capture exists; richer external identity workflows are still open |
@@ -489,7 +491,7 @@ sequenceDiagram
     Route->>Hybrid: authorize(token, action, resource)
     Hybrid->>Edge: Try edge first
     Edge->>Authn: authenticate(bearer_token)
-    Authn->>Authn: jwt.decode HS256 — verify sig + exp
+    Authn->>Authn: jwt.decode (ES256, RSA, HS256) — verify sig + exp
     Authn-->>Edge: Principal {tenant_id, user_id, policy_map}
 
     alt policy_map is empty
@@ -853,114 +855,125 @@ stateDiagram-v2
 
 ## 13. Repository Architecture
 
-```
+```text
 HexShare/
-├── app/                          # Backend application
-│   ├── main.py                   # FastAPI app factory + lifespan wiring (composition root)
-│   │
-│   ├── domain/                   # Domain models — pure Pydantic, no logic, no ORM
-│   │   └── models.py             # Document, ShareLink, VisitorSession,
-│   │                             #   ViewEvent, DocumentGroup, DocumentPermission
-│   │
-│   ├── ports/                    # Abstract interfaces — the hexagonal "contracts"
-│   │   ├── storage_port.py       # StoragePort — CRUD for all entities
-│   │   ├── token_port.py         # TokenPort — JWT encode/decode/revoke
-│   │   ├── event_bus_port.py     # EventBusPort — publish domain events
-│   │   ├── object_storage_port.py# ObjectStoragePort — read/write/presign
-│   │   ├── rendered_page_cache_port.py
-│   │   ├── task_queue_port.py    # TaskQueuePort — async job enqueue
-│   │   ├── access_control.py     # AccessControlPort — combined authn/authz
-│   │   ├── authn.py              # AuthenticatorPort — token → Principal
-│   │   ├── authz.py              # AuthorizerPort — bitmask evaluation
-│   │   ├── iam_policy.py         # IAMPolicyPort — grant/revoke/list
-│   │   └── oidc_client.py        # OIDCClientPort — PKCE token exchange
-│   │
-│   ├── services/                 # Business logic — import ports only, never adapters
-│   │   ├── document_service.py   # Document lifecycle + instance ACL enforcement
-│   │   ├── document_group_service.py  # Group CRUD + IAM dual-write coordination
-│   │   ├── link_service.py       # Share link create/revoke + JWT generation
-│   │   ├── viewer_service.py     # View session management + page rendering
-│   │   ├── upload_service.py     # Presigned upload orchestration
-│   │   ├── analytics_service.py  # View event aggregation
-│   │   ├── oidc_service.py       # PKCE flow state management
-│   │   └── document_processor.py # Format classify, PDF render, watermark, HTML wrap
-│   │
-│   ├── adapters/                 # Concrete implementations — import infra, implement ports
-│   │   ├── persistence/
-│   │   │   ├── postgres_storage.py   # asyncpg + raw SQL — no ORM
-│   │   │   └── memory_storage.py     # In-memory (tests, dev)
-│   │   ├── object_storage/
-│   │   │   ├── s3.py                 # S3 / MinIO via boto3
-│   │   │   ├── r2.py                 # Cloudflare R2 (extends S3)
-│   │   │   └── cloudinary_adapter.py
-│   │   ├── cache/
-│   │   │   ├── in_memory_rendered_page_cache.py  # LRU OrderedDict, maxsize=200
-│   │   │   └── redis_rendered_page_cache.py      # pickle serialization
-│   │   ├── queue/
-│   │   │   ├── noop_task_queue.py
-│   │   │   └── arq_task_queue.py     # Dedup by job_id = prerender:{sid}:{page}:{width}
-│   │   ├── access_control/
-│   │   │   ├── edge.py               # JWT claims only — no network
-│   │   │   ├── pdp.py                # Full PDP delegation → HexIAM
-│   │   │   └── hybrid.py             # Edge first, PDP fallback (default)
-│   │   ├── auth/                     # HEXIAMAuthenticator — HS256 verify
-│   │   ├── authz/                    # HexIAMAuthorizer — bitmask evaluator
-│   │   ├── iam/                      # HexIAMPolicyClient — service-to-service HTTP
-│   │   ├── oidc/                     # HexIAMOIDCClient — PKCE code exchange
-│   │   ├── jwt_token.py              # JWTTokenAdapter — share token lifecycle
-│   │   └── noop_event_bus.py         # EventBusPort stub — drop-in replacement point
-│   │
-│   ├── api/                      # HTTP layer — thin, delegates to services
-│   │   ├── router.py             # Documents, groups, links, viewer sessions, pages
-│   │   ├── auth_oidc.py          # /api/auth/* — login/callback/refresh/logout
-│   │   ├── uploads.py            # /api/v1/uploads/* — presigned initiate + complete
-│   │   └── dependencies/services.py  # FastAPI DI helpers (request.app.state.*)
-│   │
-│   ├── auth/                     # FastAPI dependencies that sit between HTTP and services
-│   │   ├── tenant_auth.py        # TenantPrincipal extraction (Bearer + cookie fallback)
-│   │   └── share_token_auth.py   # Share JWT → ShareTokenClaims
-│   │
-│   ├── core/
-│   │   ├── authz.py              # ResourceAction IntFlag bitmask enum + helpers
-│   │   └── flow_state.py         # Signed JWT OIDC flow state (PKCE tmp cookie)
-│   │
-│   ├── schemas/                  # Pydantic request/response schemas (API contract)
-│   │   ├── share.py
-│   │   ├── upload.py
-│   │   └── viewer.py
-│   │
-│   ├── infra/
-│   │   ├── bootstrap.py          # Side-effect import — triggers factory self-registration
-│   │   └── factories.py          # StorageFactory, ObjectStorageFactory, … (registry pattern)
-│   │
-│   └── workers/
-│       └── prerender_worker.py   # arq WorkerSettings — same service layer as API
-│
-├── frontend/                     # React + TypeScript SPA
-│   └── src/
-│       ├── pages/                # Dashboard, DocumentDetails, Groups, GroupDetails, ViewDocument
-│       ├── components/           # Layout, Badge, Button, Card, Modal, HexLogo
-│       ├── services/api.ts       # Typed API client + auto-refresh interceptor on 401
-│       ├── types.ts              # TypeScript domain types (mirrors Python domain models)
-│       └── lib/utils.ts          # cn(), formatBytes()
-│
-├── migrations/                   # yoyo reversible migrations
-│   ├── 0001_create_hexshare_core_tables.py
-│   ├── 0002_add_hexshare_indexes.py
-│   ├── 0003_add_document_upload_metadata.py
-│   └── 0004_add_document_groups_and_permissions.py
-│
-├── tests/
-│   ├── unit/                     # Pure unit tests — all ports stubbed, no infra
-│   └── api/                      # Route tests via FastAPI TestClient
-│
-├── Dockerfile                    # Multi-stage (Poetry builder → slim Python runtime)
-├── docker-compose.yaml           # Production stack
-├── docker-compose.dev.yaml       # Development stack (hot-reload volume mounts)
-├── entrypoint.sh                 # Uvicorn factory mode, configurable workers
-├── run_migrations.py             # Standalone yoyo runner
-└── pyproject.toml                # Poetry dependencies
+|-- app/                          # Backend application
+|   |-- main.py                   # FastAPI app factory + lifespan wiring (composition root)
+|   |
+|   |-- domain/                   # Domain models - pure Pydantic, no logic, no ORM
+|   |   `-- models.py             # Document, ShareLink, VisitorSession,
+|   |                             #   ViewEvent, DocumentGroup, DocumentPermission
+|   |
+|   |-- ports/                    # Abstract interfaces - the hexagonal "contracts"
+|   |   |-- storage_port.py       # StoragePort - CRUD for all entities
+|   |   |-- token_port.py         # TokenPort - JWT encode/decode/revoke
+|   |   |-- event_bus_port.py     # EventBusPort - publish domain events
+|   |   |-- object_storage_port.py# ObjectStoragePort - read/write/presign
+|   |   |-- rendered_page_cache_port.py
+|   |   |-- task_queue_port.py    # TaskQueuePort - async job enqueue
+|   |   |-- access_control.py     # AccessControlPort - combined authn/authz
+|   |   |-- authn.py              # AuthenticatorPort - token -> Principal
+|   |   |-- authz.py              # AuthorizerPort - bitmask evaluation
+|   |   |-- iam_policy.py         # IAMPolicyPort - grant/revoke/list
+|   |   `-- oidc_client.py        # OIDCClientPort - PKCE token exchange
+|   |
+|   |-- services/                 # Business logic - import ports only, never adapters
+|   |   |-- document_service.py   # Document lifecycle + instance ACL enforcement
+|   |   |-- document_group_service.py  # Group CRUD + IAM dual-write coordination
+|   |   |-- link_service.py       # Share link create/revoke + JWT generation
+|   |   |-- viewer_service.py     # View session management + page rendering
+|   |   |-- upload_service.py     # Presigned upload orchestration
+|   |   |-- analytics_service.py  # View event aggregation
+|   |   |-- oidc_service.py       # PKCE flow state management
+|   |   |-- local_session_service.py # Local access/refresh token issuance from OIDC user info
+|   |   `-- document_processor.py # Format classify, PDF render, watermark, HTML wrap
+|   |
+|   |-- adapters/                 # Concrete implementations - import infra, implement ports
+|   |   |-- persistence/
+|   |   |   |-- postgres_storage.py   # asyncpg + raw SQL - no ORM
+|   |   |   `-- memory_storage.py     # In-memory (tests, dev)
+|   |   |-- object_storage/
+|   |   |   |-- s3.py                 # S3 / MinIO via boto3
+|   |   |   |-- r2.py                 # Cloudflare R2 (extends S3)
+|   |   |   `-- cloudinary_adapter.py
+|   |   |-- cache/
+|   |   |   |-- in_memory_rendered_page_cache.py  # LRU OrderedDict, maxsize=200
+|   |   |   `-- redis_rendered_page_cache.py      # pickle serialization
+|   |   |-- queue/
+|   |   |   |-- noop_task_queue.py
+|   |   |   `-- arq_task_queue.py     # Dedup by job_id = prerender:{sid}:{page}:{width}
+|   |   |-- access_control/
+|   |   |   |-- edge.py               # JWT claims only - no network
+|   |   |   |-- pdp.py                # Full PDP delegation -> HexIAM
+|   |   |   `-- hybrid.py             # Edge first, PDP fallback (default)
+|   |   |-- auth/                     # HEXIAMAuthenticator + LocalJWTAuthenticator
+|   |   |-- authz/                    # HexIAMAuthorizer - bitmask evaluator
+|   |   |-- iam/                      # HexIAMPolicyClient + LocalIAMPolicyClient
+|   |   |-- oidc/                     # HexIAMOIDCClient + GoogleOIDCClient
+|   |   |-- jwt_token.py              # JWTTokenAdapter - share token lifecycle + JTI revocation backends
+|   |   `-- noop_event_bus.py         # EventBusPort stub - drop-in replacement point
+|   |
+|   |-- api/                      # HTTP layer - thin, delegates to services
+|   |   |-- router.py             # Documents, groups, links, viewer sessions, pages
+|   |   |-- auth_oidc.py          # /api/auth/* - login/callback/refresh/logout
+|   |   |-- uploads.py            # /api/v1/uploads/* - presigned initiate + complete
+|   |   `-- dependencies/services.py  # FastAPI DI helpers (request.app.state.*)
+|   |
+|   |-- auth/                     # FastAPI dependencies that sit between HTTP and services
+|   |   |-- tenant_auth.py        # TenantPrincipal extraction (Bearer + cookie fallback)
+|   |   `-- share_token_auth.py   # Share JWT -> ShareTokenClaims
+|   |
+|   |-- core/
+|   |   |-- authz.py              # ResourceAction IntFlag bitmask enum + helpers
+|   |   `-- flow_state.py         # Signed JWT OIDC flow state (PKCE tmp cookie)
+|   |
+|   |-- schemas/                  # Pydantic request/response schemas (API contract)
+|   |   |-- pagination.py
+|   |   |-- share.py
+|   |   |-- upload.py
+|   |   `-- viewer.py
+|   |
+|   |-- infra/
+|   |   |-- bootstrap.py          # Side-effect import - triggers factory self-registration
+|   |   `-- factories.py          # StorageFactory, ObjectStorageFactory, ... (registry pattern)
+|   |
+|   `-- workers/
+|       `-- prerender_worker.py   # arq WorkerSettings - same service layer as API
+|
+|-- frontend/                     # React + TypeScript SPA
+|   `-- src/
+|       |-- pages/                # Dashboard, DocumentDetails, Groups, Login, Signup, Landing
+|       |-- components/           # Layout, Badge, Button, Card, Modal, HexLogo
+|       |-- hooks/                # useInfiniteScroll and related UI hooks
+|       |-- services/api.ts       # Typed API client + auto-refresh interceptor on 401
+|       |-- types.ts              # TypeScript domain types (mirrors Python domain models)
+|       `-- lib/utils.ts          # cn(), formatBytes()
+|
+|-- migrations/                   # yoyo reversible migrations
+|   |-- 0001_create_hexshare_core_tables.py
+|   |-- 0002_add_hexshare_indexes.py
+|   |-- 0003_add_document_upload_metadata.py
+|   |-- 0004_add_document_groups_and_permissions.py
+|   `-- 0005_add_local_auth_and_group_memberships.py
+|
+|-- tests/
+|   |-- unit/                     # Pure unit tests - all ports stubbed, no infra
+|   |-- api/                      # Route tests via FastAPI TestClient
+|   |-- schemas/
+|   `-- services/
+|
+|-- Dockerfile                    # Multi-stage (Poetry builder -> slim Python runtime)
+|-- docker-compose.yaml           # Default deployable stack
+|-- docker-compose.dev.yaml       # Development stack (hot-reload volume mounts)
+|-- docker-compose.with-hexiam.yaml # Overlay to run HexShare and HexIAM together
+|-- entrypoint.sh                 # Uvicorn factory mode, configurable workers
+|-- SELF_HOST.md                  # Operator guide for self-hosting and HexIAM bundling
+|-- hexiam.env.bundle.example     # Template env for the bundled HexIAM checkout
+|-- run_migrations.py             # Standalone yoyo runner
+|-- scripts/prepare_hexiam.py     # Clone/update HexIAM into .hexiam/
+`-- pyproject.toml                # Poetry dependencies
 ```
+
 
 ### Key Design Decisions
 
@@ -1116,14 +1129,29 @@ sequenceDiagram
     Frontend->>Frontend: nginx serves static assets + proxies /api/*
 ```
 
+### Bundled HexIAM Overlay
+
+The base `docker-compose.yaml` stack runs HexShare with its own PostgreSQL, Redis, MinIO, worker, and frontend. The optional `docker-compose.with-hexiam.yaml` overlay adds:
+
+- a HexIAM API container
+- a HexIAM admin portal container
+- dedicated PostgreSQL and Redis services for HexIAM
+- host-to-container wiring so browser redirects use `HEXIAM_PUBLIC_URL` while PDP calls stay on the internal Docker network
+
+The overlay is meant to be paired with `scripts/prepare_hexiam.py`, which clones or refreshes the companion HexIAM repository into `.hexiam/hexalgon-iam-system` and drops a starter `.env.bundle` file there for operators to edit.
+
 ### Runtime Switches
 
 | Variable | Options | Purpose |
 |---|---|---|
 | `HEXSHARE_STORAGE` | `postgres`, `memory` | Metadata persistence adapter |
+| `HEXSHARE_AUTHENTICATOR` | `hexiam`, `local` | Access-token verification mode |
+| `HEXSHARE_DEFAULT_OIDC_IDP` | `hexiam`, `google` | Default browser login provider |
 | `HEXSHARE_OBJECT_STORAGE` | `s3`, `r2`, `cloudinary` | Object-storage adapter |
 | `HEXSHARE_ACCESS_CONTROL` | `hybrid`, `edge`, `pdp` | Authorization strategy |
+| `HEXSHARE_IAM_POLICY` | `hexiam`, `local` | IAM policy coordination adapter |
 | `HEXSHARE_RENDERED_PAGE_CACHE` | `inmemory`, `redis` | Rendered-page cache backend |
+| `HEXSHARE_SHARE_TOKEN_REVOCATION_STORE` | `memory`, `redis` | Share-link JTI revocation backend |
 | `HEXSHARE_TASK_QUEUE` | `noop`, `arq` | Background queue backend |
 | `HEXSHARE_VIEWER_STRATEGY` | `secure_streaming` | Document delivery mode |
 | `HEXSHARE_DOCUMENT_PROCESSING_ENABLED` | `true`, `false` | Enable/disable document processor |

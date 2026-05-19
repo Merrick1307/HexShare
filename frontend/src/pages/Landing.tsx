@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   ArrowRight,
   BarChart3,
+  BrainCircuit,
   Clock3,
   Eye,
   FolderOpen,
@@ -10,6 +11,7 @@ import {
   Link2,
   Lock,
   Mail,
+  MessageSquare,
   Shield,
   Upload,
   Users,
@@ -44,7 +46,7 @@ const productHighlights = [
   },
   {
     title: 'Revocation and policy checks',
-    description: 'Cut off access when a link expires or is revoked, with control enforced on the backend.',
+    description: 'Cut off access when a link expires or is revoked, with backend-enforced policy checks and token invalidation.',
     icon: Shield,
   },
   {
@@ -96,6 +98,24 @@ const productSurfaces = [
   },
 ];
 
+const comingSoonFeatures = [
+  {
+    title: 'External party identity',
+    description: 'Stronger recipient identity flows for outside parties, building on the email-gated access path that already exists today.',
+    icon: Users,
+  },
+  {
+    title: 'Q&A workflows',
+    description: 'Structured question-and-answer threads around shared documents so review can stay attached to the material.',
+    icon: MessageSquare,
+  },
+  {
+    title: 'AI-enabled Q&A',
+    description: 'Document-aware AI assistance for guided answers, follow-up questions, and faster review workflows.',
+    icon: BrainCircuit,
+  },
+];
+
 const aboutPoints = [
   {
     title: 'What it is',
@@ -103,11 +123,11 @@ const aboutPoints = [
   },
   {
     title: 'Where it runs',
-    description: 'It is designed for modern self-hosted or controlled deployments backed by familiar infrastructure.',
+    description: 'It is designed for self-hosted deployments backed by PostgreSQL, Redis, and S3-compatible object storage.',
   },
   {
     title: 'How access works',
-    description: 'Authentication, permissions, and access checks stay on the backend so sharing rules remain enforceable.',
+    description: 'OIDC login, permissions, and access checks stay on the backend so sharing rules remain enforceable after a link is sent.',
   },
 ];
 
@@ -119,6 +139,10 @@ const faqItems = [
   {
     question: 'What can users do in the app today?',
     answer: 'Users can upload documents, organize them into groups, share protected links, inspect analytics, and revoke access.',
+  },
+  {
+    question: 'Can HexShare be self-hosted?',
+    answer: 'Yes. The project is built around a self-hosted stack with PostgreSQL, Redis, S3-compatible storage, and optional HexIAM integration for identity and policy.',
   },
   {
     question: 'How do recipients view shared files?',
@@ -151,6 +175,7 @@ export function Landing() {
           <nav className="hidden items-center gap-6 md:flex">
             <NavLink href="#features" label="Features" />
             <NavLink href="#workflow" label="Workflow" />
+            <NavLink href="#roadmap" label="Coming Soon" />
             <NavLink href="#about" label="About" />
             <NavLink href="#faq" label="FAQ" />
             <NavLink href="#contact" label="Contact" />
@@ -173,14 +198,14 @@ export function Landing() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-600">
                 <Lock className="h-3.5 w-3.5" />
-                Secure sharing for modern teams
+                Self-hosted secure document delivery
               </div>
               <h1 className="mt-6 text-5xl font-semibold tracking-tight text-zinc-950 sm:text-6xl">
-                Share sensitive documents with confidence.
+                Share sensitive documents without giving up control.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-relaxed text-zinc-600">
-                HexShare helps teams upload, organize, protect, and track important documents from one workspace.
-                Create controlled share links, manage access, and keep visibility after a file is sent.
+                HexShare gives teams a self-hosted workspace for protected document delivery. Upload files, organize
+                them into groups, enforce OIDC-backed access, and keep visibility after a link is sent.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link to="/signup">
@@ -201,8 +226,8 @@ export function Landing() {
                   <p className="mt-2 text-sm text-zinc-700">Share documents with expiry, permission, and recipient controls.</p>
                 </div>
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Controlled viewing</p>
-                  <p className="mt-2 text-sm text-zinc-700">Give recipients a secure viewing flow instead of open file access.</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">OIDC-backed access</p>
+                  <p className="mt-2 text-sm text-zinc-700">Keep authentication and policy enforcement on the backend.</p>
                 </div>
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">View analytics</p>
@@ -215,7 +240,7 @@ export function Landing() {
               <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-4">
                 <div>
                   <p className="text-sm font-semibold">Built for the full sharing flow</p>
-                  <p className="mt-1 text-xs text-zinc-400">From upload to protected delivery</p>
+                  <p className="mt-1 text-xs text-zinc-400">From upload to audited delivery</p>
                 </div>
                 <div className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">HexShare</div>
               </div>
@@ -249,7 +274,7 @@ export function Landing() {
                 Everything you need to control document access.
               </h2>
               <p className="mt-4 text-base leading-relaxed text-zinc-600">
-                HexShare brings uploads, permissions, protected delivery, and visibility into a single sharing workflow.
+                HexShare brings uploads, permissions, protected delivery, and visibility into a single self-hosted sharing workflow.
               </p>
             </div>
 
@@ -281,7 +306,7 @@ export function Landing() {
                 A sharing flow that stays under control.
               </h2>
               <p className="mt-4 text-base leading-relaxed text-zinc-600">
-                From the first upload to the final view, every step is built around secure delivery and clear ownership.
+                From the first upload to the final view, every step is built around secure delivery, clear ownership, and revocable access.
               </p>
             </div>
 
@@ -320,6 +345,38 @@ export function Landing() {
           </div>
         </section>
 
+        <section id="roadmap" className="border-t border-zinc-200 bg-zinc-50 px-6 py-20 lg:px-8">
+          <div className="mx-auto max-w-6xl">
+            <div className="max-w-3xl">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-zinc-500">Coming soon</p>
+              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">
+                The next workflows on the product path.
+              </h2>
+              <p className="mt-4 text-base leading-relaxed text-zinc-600">
+                The current release is focused on controlled delivery, protected viewing, and access enforcement. The next layer extends that into richer collaboration and recipient identity workflows.
+              </p>
+            </div>
+
+            <div className="mt-14 grid gap-6 md:grid-cols-3">
+              {comingSoonFeatures.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <Card key={item.title} className="border-zinc-200 bg-white">
+                    <CardContent className="p-6">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50">
+                        <Icon className="h-5 w-5 text-zinc-900" />
+                      </div>
+                      <h3 className="mt-5 text-lg font-semibold tracking-tight text-zinc-950">{item.title}</h3>
+                      <p className="mt-2 text-sm leading-relaxed text-zinc-600">{item.description}</p>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
         <section id="about" className="border-t border-zinc-200 px-6 py-20 lg:px-8">
           <div className="mx-auto max-w-6xl">
             <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
@@ -330,7 +387,7 @@ export function Landing() {
                 </h2>
                 <p className="mt-4 text-base leading-relaxed text-zinc-600">
                   HexShare is built for teams that need a better way to share sensitive documents with clients,
-                  partners, and internal stakeholders.
+                  partners, and internal stakeholders while keeping the stack in their own control.
                 </p>
               </div>
 
@@ -382,10 +439,10 @@ export function Landing() {
             <div className="max-w-3xl">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-zinc-500">Contact</p>
               <h2 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">
-                Get started or reach the project.
+                Deploy it or inspect the stack.
               </h2>
               <p className="mt-4 text-base leading-relaxed text-zinc-600">
-                Start using HexShare, review the project, or open a discussion through the public repository.
+                Start using HexShare, review the codebase, or use the repository as the entry point for self-hosting.
               </p>
             </div>
 
@@ -394,7 +451,7 @@ export function Landing() {
                 <Mail className="h-5 w-5 text-zinc-500" />
                 <h3 className="mt-4 text-lg font-semibold tracking-tight text-zinc-950">Workspace access</h3>
                 <p className="mt-2 text-sm leading-relaxed text-zinc-600">
-                  Create a workspace or sign in to continue with the configured access flow.
+                  Create a workspace or sign in through the configured identity flow for this deployment.
                 </p>
                 <div className="mt-5 flex flex-col gap-3">
                   <Link to="/signup">
@@ -415,7 +472,7 @@ export function Landing() {
                 <Github className="h-5 w-5 text-zinc-500" />
                 <h3 className="mt-4 text-lg font-semibold tracking-tight text-zinc-950">Source and docs</h3>
                 <p className="mt-2 text-sm leading-relaxed text-zinc-600">
-                  Explore the repository, documentation, and architecture notes behind the product.
+                  Explore the repository, architecture notes, and self-hosting guides behind the product.
                 </p>
                 <a
                   href={repoUrl}
@@ -432,7 +489,7 @@ export function Landing() {
                 <Clock3 className="h-5 w-5 text-zinc-500" />
                 <h3 className="mt-4 text-lg font-semibold tracking-tight text-zinc-950">Technical discussion</h3>
                 <p className="mt-2 text-sm leading-relaxed text-zinc-600">
-                  Use the issue tracker for bugs, questions, and contribution-related discussion.
+                  Use the issue tracker for bugs, implementation questions, and deployment-related discussion.
                 </p>
                 <a
                   href={issuesUrl}

@@ -4,7 +4,7 @@ All notable changes to HexShare will be documented in this file.
 
 The project is currently best versioned as `0.1.0`: the core document-sharing workflow is real and usable, but there are still clear pre-1.0 gaps around operator automation, broader identity workflows, and release hardening.
 
-## [0.1.0] - 2026-05-19
+## [0.1.0] - 2026-05-20
 
 ### Added
 
@@ -21,8 +21,3 @@ The project is currently best versioned as `0.1.0`: the core document-sharing wo
 - Docker Compose support for the main HexShare stack
 - Bundled HexIAM self-hosting overlay and bootstrap script
 - Initial architecture, self-hosting, and operator documentation
-
-### Notes
-
-- This release should be treated as an early production-shaped open source release, not a `1.0.0` stability promise.
-- Recommended release tag: `v0.1.0`

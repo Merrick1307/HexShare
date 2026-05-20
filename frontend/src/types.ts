@@ -1,3 +1,8 @@
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+}
+
 export interface Document {
   id: string;
   tenant_id: string;
@@ -31,9 +36,21 @@ export interface ShareLink {
   share_path: string;
 }
 
+export interface PageAnalytics {
+  page_number: number;
+  view_count: number;
+  total_duration_ms: number;
+  avg_duration_ms: number;
+}
+
 export interface DocumentAnalytics {
   unique_visitors: number;
   total_views: number;
+  total_sessions: number;
+  page_views: number;
+  total_time_ms: number;
+  avg_session_duration_ms: number;
+  pages: PageAnalytics[];
 }
 
 export interface ShareInspection {

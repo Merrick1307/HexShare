@@ -26,14 +26,14 @@ export function Login() {
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <Card className="border-zinc-200 shadow-sm">
           <CardHeader className="space-y-1 text-center">
-            <CardTitle className="text-2xl">Sign in with HexIAM</CardTitle>
-            <CardDescription>HexShare currently uses backend-managed SSO for workspace access.</CardDescription>
+            <CardTitle className="text-2xl">Sign in to HexShare</CardTitle>
+            <CardDescription>Continue with the configured single sign-on provider for this workspace.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
               <div className="flex items-start gap-3">
                 <Lock className="mt-0.5 h-4 w-4 text-zinc-400" />
-                <p>Authenticate via HexIAM.</p>
+                <p>Authenticate with your configured identity provider.</p>
               </div>
             </div>
             <Button type="button" className="w-full gap-2" disabled={isLoading} onClick={handleSSOLogin}>

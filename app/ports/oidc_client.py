@@ -42,3 +42,11 @@ class OIDCClientPort(ABC):
 
     @abstractmethod
     async def refresh(self, *, refresh_token: str) -> OIDCTokens: ...
+
+    async def get_user_info(
+        self,
+        *,
+        access_token: str,
+        id_token: Optional[str] = None,
+    ) -> Mapping[str, Any]:
+        raise NotImplementedError("OIDC userinfo not supported by this client")

@@ -23,6 +23,7 @@ from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import ResourceAction
 from app.domain import Document, DocumentGroup, ShareLink
 from app.ports.access_control import AccessDenied
+from app.schemas.pagination import PaginatedResponse
 from app.schemas.share import ShareLinkResponse
 from app.schemas.viewer import (
     CreateViewSessionRequest,
@@ -103,13 +104,16 @@ def api_router() -> APIRouter:
             created_by=principal.user_id,
         )
 
-    @router.get("/documents", response_model=list[Document])
+    @router.get("/documents", response_model=PaginatedResponse[Document])
     async def list_documents(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=100),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
-    ) -> list[Document]:
-        docs = await document_service.list_accessible_documents(principal=principal)
-        return list(docs)
+    ) -> PaginatedResponse[Document]:
+        docs = list(await document_service.list_accessible_documents(principal=principal))
+        total = len(docs)
+        return PaginatedResponse(items=docs[offset:offset + limit], total=total)
 
     @router.get("/documents/{document_id}", response_model=Document)
     async def get_document(
@@ -169,25 +173,32 @@ def api_router() -> APIRouter:
         except ValueError:
             raise HTTPException(status_code=404, detail="Document not found")
 
-    @router.get("/links", response_model=list[ShareLinkResponse])
+    @router.get("/links", response_model=PaginatedResponse[ShareLinkResponse])
     async def list_links(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=100),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         link_service: LinkService = Depends(get_link_service),
-    ) -> list[ShareLinkResponse]:
-        links = await link_service.list_share_links(tenant_id=principal.tenant_id)
+    ) -> PaginatedResponse[ShareLinkResponse]:
+        links = list(await link_service.list_share_links(tenant_id=principal.tenant_id))
+        links.sort(key=lambda l: (l.revoked_at is not None, -(l.created_at.timestamp() if l.created_at else 0)))
+        total = len(links)
+        page = links[offset:offset + limit]
         result: list[ShareLinkResponse] = []
-        for link in links:
+        for link in page:
             token = await link_service.generate_share_token(link)
             result.append(_serialize_link(link, token))
-        return result
+        return PaginatedResponse(items=result, total=total)
 
-    @router.get("/documents/{document_id}/links", response_model=list[ShareLinkResponse])
+    @router.get("/documents/{document_id}/links", response_model=PaginatedResponse[ShareLinkResponse])
     async def list_document_links(
         document_id: str,
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=100),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
-    ) -> list[ShareLinkResponse]:
+    ) -> PaginatedResponse[ShareLinkResponse]:
         try:
             await document_service.require_document_access(
                 principal=principal,
@@ -198,15 +209,18 @@ def api_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="Forbidden")
         except ValueError:
             raise HTTPException(status_code=404, detail="Document not found")
-        links = await link_service.list_share_links(
+        links = list(await link_service.list_share_links(
             tenant_id=principal.tenant_id,
             document_id=document_id,
-        )
+        ))
+        links.sort(key=lambda l: (l.revoked_at is not None, -(l.created_at.timestamp() if l.created_at else 0)))
+        total = len(links)
+        page = links[offset:offset + limit]
         result: list[ShareLinkResponse] = []
-        for link in links:
+        for link in page:
             token = await link_service.generate_share_token(link)
             result.append(_serialize_link(link, token))
-        return result
+        return PaginatedResponse(items=result, total=total)
 
     @router.post("/documents/{document_id}/links", response_model=ShareLinkResponse)
     async def create_link(
@@ -296,13 +310,16 @@ def api_router() -> APIRouter:
         return metrics
 
 
-    @router.get("/document-groups", response_model=list[DocumentGroup])
+    @router.get("/document-groups", response_model=PaginatedResponse[DocumentGroup])
     async def list_document_groups(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=100),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         group_service: DocumentGroupService = Depends(get_document_group_service),
-    ) -> list[DocumentGroup]:
-        groups = await group_service.list_user_groups(principal=principal)
-        return list(groups)
+    ) -> PaginatedResponse[DocumentGroup]:
+        groups = list(await group_service.list_user_groups(principal=principal))
+        total = len(groups)
+        return PaginatedResponse(items=groups[offset:offset + limit], total=total)
 
     @router.post("/document-groups", response_model=DocumentGroup)
     async def create_document_group(

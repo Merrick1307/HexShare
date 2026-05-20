@@ -17,6 +17,7 @@ from app.domain import (
     Document,
     DocumentGroup,
     DocumentPermission,
+    EventType,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -251,6 +252,20 @@ class PostgresStorage(StoragePort):
         async with self._pool.acquire() as con:
             await con.execute(sql, tenant_id, session_id, ended_at)
 
+    async def list_visitor_sessions(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[VisitorSession]:
+        sql = """
+        SELECT vs.id, vs.tenant_id, vs.share_link_id, vs.visitor_id, vs.ip_hash, vs.ua_hash, vs.started_at, vs.ended_at
+        FROM visitor_sessions vs
+        JOIN share_links sl ON sl.id = vs.share_link_id
+        WHERE vs.tenant_id = $1 AND sl.document_id = $2
+        ORDER BY vs.started_at ASC
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, document_id)
+        return [self._row_to_visitor_session(row) for row in rows if row]
+
     async def save_view_event(self, event: ViewEvent) -> None:
         sql = """
         INSERT INTO view_events (
@@ -299,6 +314,45 @@ class PostgresStorage(StoragePort):
             )
             for row in rows
         ]
+
+    async def get_latest_page_view_event(
+        self, *, tenant_id: str, visitor_session_id: str
+    ) -> Optional[ViewEvent]:
+        sql = """
+        SELECT *
+        FROM view_events
+        WHERE tenant_id = $1
+          AND visitor_session_id = $2
+          AND event_type = $3
+        ORDER BY timestamp DESC
+        LIMIT 1
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id, visitor_session_id, EventType.PAGE_VIEW.value)
+        if not row:
+            return None
+        return ViewEvent(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            document_id=row["document_id"],
+            share_link_id=row["share_link_id"],
+            visitor_session_id=row["visitor_session_id"],
+            event_type=row["event_type"],
+            page_number=row["page_number"],
+            duration_ms=row["duration_ms"],
+            timestamp=row["timestamp"],
+        )
+
+    async def update_view_event_duration(
+        self, *, tenant_id: str, event_id: str, duration_ms: int
+    ) -> None:
+        sql = """
+        UPDATE view_events
+        SET duration_ms = $3
+        WHERE tenant_id = $1 AND id = $2
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(sql, tenant_id, event_id, duration_ms)
 
 
     @staticmethod

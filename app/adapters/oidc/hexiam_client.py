@@ -10,6 +10,8 @@ from app.ports.oidc_client import OIDCClientPort, OIDCTokens
 
 
 class HexIAMOIDCClient(OIDCClientPort):
+    supports_dedicated_signup = True
+
     def __init__(
         self,
         *,
@@ -32,7 +34,7 @@ class HexIAMOIDCClient(OIDCClientPort):
 
     @property
     def token_endpoint(self) -> str:
-        return f"{self.iam_url.replace("localhost", "host.docker.internal")}/api/v1/oidc/token"
+        return f"{self.iam_url.replace('localhost', 'host.docker.internal')}/api/v1/oidc/token"
 
     @property
     def signup_endpoint(self) -> str:
@@ -58,6 +60,8 @@ class HexIAMOIDCClient(OIDCClientPort):
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
+        if extra_params:
+            params.update(extra_params)
         return f"{self.authorize_endpoint}?{urlencode(params)}"
 
     def build_signup_url(self, *, redirect_uri: str, extra_params: Optional[Mapping[str, str]] = None) -> str:

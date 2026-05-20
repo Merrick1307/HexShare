@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   ArrowLeft,
   CheckCircle2,
+  Clock3,
   Copy,
   Download,
   ExternalLink,
@@ -14,13 +15,14 @@ import {
   Users,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { Document, ShareLink, DocumentAnalytics } from '../types';
+import { Document, ShareLink, DocumentAnalytics, PageAnalytics } from '../types';
 import { formatBytes } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 
 function statusForLink(link: ShareLink) {
   if (link.revoked_at) return { label: 'Revoked', variant: 'danger' as const };
@@ -31,7 +33,20 @@ function statusForLink(link: ShareLink) {
 export function DocumentDetails() {
   const { id } = useParams<{ id: string }>();
   const [document, setDocument] = useState<Document | null>(null);
-  const [links, setLinks] = useState<ShareLink[]>([]);
+  const linksContainerRef = useRef<HTMLDivElement>(null);
+  const {
+    items: links,
+    total: linksTotal,
+    isLoading: linksLoading,
+    sentinelRef: linksSentinelRef,
+    reset: resetLinks,
+    setItems: setLinks,
+  } = useInfiniteScroll<ShareLink>({
+    fetchFn: (offset, limit) => id ? api.listLinks(id, offset, limit) : Promise.resolve({ items: [], total: 0 }),
+    pageSize: 20,
+    enabled: !!id,
+    rootRef: linksContainerRef,
+  });
   const [analytics, setAnalytics] = useState<DocumentAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreateLinkModalOpen, setIsCreateLinkModalOpen] = useState(false);
@@ -60,14 +75,13 @@ export function DocumentDetails() {
     setIsLoading(true);
     setPageError(null);
     try {
-      const [doc, docAnalytics, docLinks] = await Promise.all([
+      const [doc, docAnalytics] = await Promise.all([
         api.getDocument(docId),
         api.getAnalytics(docId),
-        api.listLinks(docId),
       ]);
       setDocument(doc);
       setAnalytics(docAnalytics);
-      setLinks(docLinks);
+      resetLinks();
     } catch (error) {
       setPageError(error instanceof Error ? error.message : 'Failed to load document details');
     } finally {
@@ -108,7 +122,7 @@ export function DocumentDetails() {
     setActionError(null);
     try {
       await api.revokeLink(linkId);
-      await loadData(id);
+      resetLinks();
       setInfoMessage(`Link ${linkId} revoked.`);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to revoke link');
@@ -152,13 +166,13 @@ export function DocumentDetails() {
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500">
               <Badge variant={activeCount > 0 ? 'success' : 'neutral'}>{activeCount} active</Badge>
-              <span>{links.length} total</span>
+              <span>{linksTotal} total</span>
             </div>
 
             {links.length === 0 ? (
               <div className="rounded-xl border border-dashed border-zinc-200 px-6 py-10 text-center text-sm text-zinc-500">No share links yet for this document.</div>
             ) : (
-              <div className="space-y-3">
+              <div ref={linksContainerRef} className="space-y-3 max-h-80 overflow-y-auto">
                 {links.map((link) => {
                   const status = statusForLink(link);
                   const shareUrl = api.toAbsoluteFrontendUrl(link.share_path);
@@ -197,6 +211,10 @@ export function DocumentDetails() {
                 })}
               </div>
             )}
+            <div ref={linksSentinelRef} className="h-1" />
+            {linksLoading && links.length > 0 ? (
+              <div className="text-center text-sm text-zinc-400">Loading more links...</div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -206,6 +224,25 @@ export function DocumentDetails() {
             <CardContent className="space-y-5">
               <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600"><Eye className="h-6 w-6" /></div><div><p className="text-2xl font-semibold text-zinc-950">{analytics?.total_views ?? 0}</p><p className="text-sm font-medium text-zinc-500">Total views</p></div></div>
               <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><Users className="h-6 w-6" /></div><div><p className="text-2xl font-semibold text-zinc-950">{analytics?.unique_visitors ?? 0}</p><p className="text-sm font-medium text-zinc-500">Unique visitors</p></div></div>
+              <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-600"><Printer className="h-6 w-6" /></div><div><p className="text-2xl font-semibold text-zinc-950">{analytics?.page_views ?? 0}</p><p className="text-sm font-medium text-zinc-500">Page views</p></div></div>
+              <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-full bg-purple-50 text-purple-600"><Clock3 className="h-6 w-6" /></div><div><p className="text-2xl font-semibold text-zinc-950">{analytics?.avg_session_duration_ms ? Math.round(analytics.avg_session_duration_ms / 1000) : 0}s</p><p className="text-sm font-medium text-zinc-500">Avg session duration</p></div></div>
+
+              {analytics?.pages && analytics.pages.length > 0 ? (
+                <div className="pt-4 border-t border-zinc-200">
+                  <p className="text-sm font-medium text-zinc-900 mb-3">Page-by-page engagement</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {analytics.pages.map((page: PageAnalytics) => (
+                      <div key={page.page_number} className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-600">Page {page.page_number}</span>
+                        <div className="flex items-center gap-4">
+                          <span className="text-zinc-500">{page.view_count} views</span>
+                          <span className="text-zinc-500">{Math.round(page.avg_duration_ms / 1000)}s avg</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 

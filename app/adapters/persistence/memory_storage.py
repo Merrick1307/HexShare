@@ -17,6 +17,7 @@ from app.domain import (
     Document,
     DocumentGroup,
     DocumentPermission,
+    EventType,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -91,6 +92,20 @@ class MemoryStorage(StoragePort):
         if session:
             session.ended_at = ended_at
 
+    async def list_visitor_sessions(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[VisitorSession]:
+        link_ids = {
+            link.id
+            for link in self._share_links.get(tenant_id, {}).values()
+            if link.document_id == document_id
+        }
+        return [
+            session
+            for session in self._visitor_sessions.get(tenant_id, {}).values()
+            if session.share_link_id in link_ids
+        ]
+
     async def save_view_event(self, event: ViewEvent) -> None:
         self._view_events[event.tenant_id].append(event)
 
@@ -98,6 +113,26 @@ class MemoryStorage(StoragePort):
         self, *, tenant_id: str, document_id: str
     ) -> Iterable[ViewEvent]:
         return [e for e in self._view_events.get(tenant_id, []) if e.document_id == document_id]
+
+    async def get_latest_page_view_event(
+        self, *, tenant_id: str, visitor_session_id: str
+    ) -> Optional[ViewEvent]:
+        page_events = [
+            event
+            for event in self._view_events.get(tenant_id, [])
+            if event.visitor_session_id == visitor_session_id and event.event_type == EventType.PAGE_VIEW
+        ]
+        if not page_events:
+            return None
+        return max(page_events, key=lambda event: event.timestamp)
+
+    async def update_view_event_duration(
+        self, *, tenant_id: str, event_id: str, duration_ms: int
+    ) -> None:
+        for index, event in enumerate(self._view_events.get(tenant_id, [])):
+            if event.id == event_id:
+                self._view_events[tenant_id][index] = event.copy(update={"duration_ms": duration_ms})
+                return
 
 
     async def save_document_permission(self, permission: DocumentPermission) -> None:

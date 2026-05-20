@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { MoreHorizontal, Search, Upload, FileText, Link2, Eye, FolderInput, Trash2 } from 'lucide-react';
@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 
 function DocumentRowMenu({
   doc,
@@ -25,8 +26,21 @@ function DocumentRowMenu({
   onMoveToGroup: (document: Document) => void;
   onDelete: (document: Document) => void;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onToggle();
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen, onToggle]);
+
   return (
-    <div className="relative inline-block text-left">
+    <div ref={menuRef} className="relative inline-block text-left">
       <Button type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={onToggle}>
         <MoreHorizontal className="h-4 w-4" />
       </Button>
@@ -84,7 +98,21 @@ const DEFAULT_LINK_DRAFT: LinkDraft = {
 };
 
 export function Dashboard() {
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const {
+    items: documents,
+    total: docTotal,
+    isLoading: docsLoading,
+    hasMore: docsHasMore,
+    sentinelRef: docSentinelRef,
+    reset: resetDocs,
+    setItems: setDocuments,
+  } = useInfiniteScroll<Document>({
+    fetchFn: (offset, limit) => api.listDocuments(offset, limit),
+    pageSize: 20,
+    rootRef: containerRef,
+  });
+
   const [links, setLinks] = useState<ShareLink[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -104,15 +132,14 @@ export function Dashboard() {
   const [moveTargetGroupId, setMoveTargetGroupId] = useState<string>('');
 
   const refreshDocuments = useCallback(async () => {
-    const docs = await api.listDocuments();
-    setDocuments(docs);
-    return docs;
-  }, []);
+    resetDocs();
+    return [];
+  }, [resetDocs]);
 
   const refreshLinks = useCallback(async () => {
     try {
-      const allLinks = await api.listLinks();
-      setLinks(allLinks);
+      const resp = await api.listLinks(undefined, 0, 100);
+      setLinks(resp.items);
     } catch {
       // keep the document list usable even when link aggregation fails
     }
@@ -120,8 +147,8 @@ export function Dashboard() {
 
   const refreshGroups = useCallback(async () => {
     try {
-      const groupList = await api.listGroups();
-      setGroups(groupList);
+      const resp = await api.listGroups(0, 100);
+      setGroups(resp.items);
     } catch {
       // groups are optional, don't block on failure
     }
@@ -314,12 +341,12 @@ export function Dashboard() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
           <Input placeholder="Search documents..." className="pl-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
-        <div className="text-sm text-zinc-500">{documents.length} document{documents.length === 1 ? '' : 's'}</div>
+        <div className="text-sm text-zinc-500">{docTotal} document{docTotal === 1 ? '' : 's'}</div>
       </div>
 
-      <div className="overflow-visible rounded-xl border border-zinc-200 bg-white shadow-sm">
+      <div ref={containerRef} className="overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-sm max-h-[calc(100vh-16rem)]">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
+          <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
             <tr>
               <th className="px-6 py-4">Name</th>
               <th className="px-6 py-4">Size</th>
@@ -329,7 +356,7 @@ export function Dashboard() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200">
-            {isLoading ? (
+            {isLoading && documents.length === 0 ? (
               <tr><td colSpan={5} className="px-6 py-8 text-center text-zinc-500">Loading documents...</td></tr>
             ) : filteredDocuments.length === 0 ? (
               <tr>
@@ -384,6 +411,10 @@ export function Dashboard() {
             )}
           </tbody>
         </table>
+        <div ref={docSentinelRef} className="h-1" />
+        {docsLoading && documents.length > 0 ? (
+          <div className="px-6 py-3 text-center text-sm text-zinc-400">Loading more documents...</div>
+        ) : null}
       </div>
 
       <Modal isOpen={isUploadModalOpen} onClose={() => { setIsUploadModalOpen(false); setSelectedGroupId(''); }} title="Upload Document">

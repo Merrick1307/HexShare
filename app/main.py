@@ -12,7 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters import NoopEventBus, JWTTokenAdapter
 from app.adapters.authz.hex_iam import HexIAMAuthorizer
-from app.adapters.oidc.hexiam_client import HexIAMOIDCClient
+from app.adapters.oidc import GoogleOIDCClient, HexIAMOIDCClient
 from app.api.auth_oidc import router as auth_oidc_router
 from app.api.router import api_router
 from app.api.uploads import router as uploads_router
@@ -37,6 +37,7 @@ from app.services import (
     UploadService,
     ViewerService,
 )
+from app.services.local_session_service import LocalSessionService
 
 
 def _to_bool(value: str | None, *, default: bool = False) -> bool:
@@ -52,6 +53,7 @@ async def lifespan(fastapi_app: FastAPI):
     preferred_storage = os.getenv("HEXSHARE_STORAGE", "postgres")
     preferred_access_control = os.getenv("HEXSHARE_ACCESS_CONTROL", "hybrid")
     preferred_authenticator = os.getenv("HEXSHARE_AUTHENTICATOR", "hexiam")
+    preferred_oidc_idp = os.getenv("HEXSHARE_DEFAULT_OIDC_IDP", "hexiam").strip() or "hexiam"
     preferred_object_storage = os.getenv("HEXSHARE_OBJECT_STORAGE", "s3")
     preferred_rendered_page_cache = os.getenv("HEXSHARE_RENDERED_PAGE_CACHE", "inmemory")
     preferred_task_queue = os.getenv("HEXSHARE_TASK_QUEUE", "noop")
@@ -64,6 +66,11 @@ async def lifespan(fastapi_app: FastAPI):
     )
     frontend_url = os.getenv("HEXSHARE_FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
+    if preferred_authenticator == "local" and preferred_access_control == "hybrid":
+        preferred_access_control = "edge"
+    if preferred_authenticator == "local" and preferred_access_control == "pdp":
+        raise RuntimeError("HEXSHARE_ACCESS_CONTROL=pdp is not compatible with HEXSHARE_AUTHENTICATOR=local")
+
     import app.infra.bootstrap  # noqa: F401
 
     authorizer = HexIAMAuthorizer()
@@ -73,7 +80,7 @@ async def lifespan(fastapi_app: FastAPI):
     object_storage = ObjectStorageFactory.create(preferred_object_storage)
     rendered_page_cache = RenderedPageCacheFactory.create(preferred_rendered_page_cache)
     task_queue = TaskQueueFactory.create(preferred_task_queue)
-    iam_policy = IAMPolicyFactory.create(preferred_iam_policy)
+    iam_policy = IAMPolicyFactory.create(preferred_iam_policy, pool=dp_pool)
 
     access_control = AccessControlFactory.create(
         preferred_access_control,
@@ -85,15 +92,22 @@ async def lifespan(fastapi_app: FastAPI):
     )
 
     token_adapter = JWTTokenAdapter()
+    local_session_service = (
+        LocalSessionService(pool=dp_pool)
+        if preferred_authenticator == "local"
+        else None
+    )
     event_bus = NoopEventBus()
     document_service = DocumentService(persistence_layer, event_bus)
     document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
     document_processor = DocumentProcessor()
+    max_upload = os.getenv("HEXSHARE_MAX_UPLOAD_SIZE_BYTES")
     upload_service = UploadService(
         metadata_storage=persistence_layer,
         object_storage=object_storage,
         document_service=document_service,
+        max_size_bytes=int(max_upload) if max_upload else None,
     )
     viewer_service = ViewerService(
         storage=persistence_layer,
@@ -125,13 +139,24 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.access_control = access_control
     fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
     fastapi_app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
-    fastapi_app.state.oidc_clients = {
-        "hexiam": HexIAMOIDCClient(
-            iam_url=os.getenv("HEXIAM_URL", "http://localhost:8000"),
-            client_id=os.getenv("HEXSHARE_PDP_CLIENT_ID", ""),
-            client_secret=os.getenv("HEXSHARE_PDP_CLIENT_SECRET", ""),
+    hexiam_url = os.getenv("HEXIAM_URL", "").strip()
+    hexiam_client_id = os.getenv("HEXSHARE_CLIENT_ID") or os.getenv("HEXSHARE_PDP_CLIENT_ID", "")
+    hexiam_client_secret = os.getenv("HEXSHARE_CLIENT_SECRET") or os.getenv("HEXSHARE_PDP_CLIENT_SECRET", "")
+    oidc_clients = {}
+    if preferred_oidc_idp == "hexiam" or (hexiam_url and hexiam_client_id):
+        oidc_clients["hexiam"] = HexIAMOIDCClient(
+            iam_url=hexiam_url or "http://localhost:8000",
+            client_id=hexiam_client_id,
+            client_secret=hexiam_client_secret,
         )
-    }
+    if preferred_oidc_idp == "google" or os.getenv("GOOGLE_OIDC_CLIENT_ID"):
+        oidc_clients["google"] = GoogleOIDCClient()
+    if preferred_oidc_idp not in oidc_clients:
+        raise RuntimeError(f"Configured default OIDC provider '{preferred_oidc_idp}' is not available")
+    fastapi_app.state.oidc_clients = oidc_clients
+    fastapi_app.state.default_oidc_idp = preferred_oidc_idp
+    fastapi_app.state.authenticator_mode = preferred_authenticator
+    fastapi_app.state.local_session_service = local_session_service
     fastapi_app.state.frontend_url = frontend_url
 
     yield

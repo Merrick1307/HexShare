@@ -43,7 +43,7 @@ export function Layout() {
         <div className="border-t border-zinc-200 p-4">
           <div className="flex items-center justify-between rounded-lg px-3 py-2">
             <div>
-              <p className="text-sm font-medium text-zinc-900">HexShare Workspace</p>
+              <p className="text-sm font-medium text-zinc-900">My Workspace</p>
               {/* <p className="text-xs text-zinc-500">Cookie-based backend auth</p> */}
             </div>
             <Link to="/" className="text-zinc-400 hover:text-zinc-600" aria-label="Return home">

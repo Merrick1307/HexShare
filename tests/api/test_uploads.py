@@ -193,3 +193,65 @@ async def test_download_handler_404s_when_document_missing():
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Document not found"
+
+
+@pytest.mark.asyncio
+async def test_initiate_upload_handler_413s_when_size_exceeded():
+    principal = TenantPrincipal(tenant_id="tenant_1", user_id="user_1")
+
+    class OversizedUploadService(StubUploadService):
+        async def initiate_upload(self, **kwargs):
+            raise ValueError("upload_size_exceeded")
+
+    class Payload:
+        filename = "big.pdf"
+        content_type = "application/pdf"
+        size = 999_999_999
+        expires_in = 900
+
+    with pytest.raises(HTTPException) as exc:
+        await initiate_upload(Payload(), principal=principal, upload_service=OversizedUploadService())
+
+    assert exc.value.status_code == 413
+    assert exc.value.detail == "File size exceeds the maximum allowed"
+
+
+@pytest.mark.asyncio
+async def test_initiate_upload_handler_re_raises_unrecognized_value_error():
+    principal = TenantPrincipal(tenant_id="tenant_1", user_id="user_1")
+
+    class BrokenUploadService(StubUploadService):
+        async def initiate_upload(self, **kwargs):
+            raise ValueError("some_other_error")
+
+    class Payload:
+        filename = "file.pdf"
+        content_type = "application/pdf"
+        size = 123
+        expires_in = 900
+
+    with pytest.raises(ValueError, match="some_other_error"):
+        await initiate_upload(Payload(), principal=principal, upload_service=BrokenUploadService())
+
+
+@pytest.mark.asyncio
+async def test_complete_upload_handler_413s_when_size_exceeded():
+    principal = TenantPrincipal(tenant_id="tenant_1", user_id="user_1")
+
+    class OversizedUploadService(StubUploadService):
+        async def complete_upload(self, **kwargs):
+            raise ValueError("upload_size_exceeded")
+
+    class Payload:
+        document_id = "doc_1"
+        object_key = "documents/tenants/t1/documents/doc_1/big.pdf"
+        name = "big.pdf"
+        mime_type = "application/pdf"
+        size = 999_999_999
+        etag = None
+
+    with pytest.raises(HTTPException) as exc:
+        await complete_upload(Payload(), principal=principal, upload_service=OversizedUploadService())
+
+    assert exc.value.status_code == 413
+    assert exc.value.detail == "File size exceeds the maximum allowed"

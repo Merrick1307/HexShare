@@ -27,13 +27,13 @@ export function Signup() {
         <Card className="border-zinc-200 shadow-sm">
           <CardHeader className="space-y-1 text-center">
             <CardTitle className="text-2xl">Create a workspace</CardTitle>
-            <CardDescription>HEXALGON IAM</CardDescription>
+            <CardDescription>Continue with the configured single sign-on provider.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
               <div className="flex items-start gap-3">
                 <Building2 className="mt-0.5 h-4 w-4 text-zinc-400" />
-                <p>You would be redirected to authenticate on Hexalgon IAM.</p>
+                <p>You will be redirected to the configured identity provider to continue.</p>
               </div>
             </div>
             <Button type="button" className="w-full gap-2" disabled={isLoading} onClick={handleSSOSignup}>

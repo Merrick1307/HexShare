@@ -13,9 +13,12 @@ import { DocumentDetails } from './pages/DocumentDetails';
 import { Groups } from './pages/Groups';
 import { GroupDetails } from './pages/GroupDetails';
 import { ViewDocument } from './pages/ViewDocument';
+import { NotFound } from './pages/NotFound';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <Router>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -31,9 +34,10 @@ export default function App() {
           <Route path="/groups/:id" element={<GroupDetails />} />
         </Route>
         
-        <Route path="*" element={<div className="p-8 text-zinc-500">Page not found.</div>} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Router>
+    </ErrorBoundary>
   );
 }
 

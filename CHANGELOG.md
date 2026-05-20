@@ -4,7 +4,7 @@ All notable changes to HexShare will be documented in this file.
 
 The project is currently best versioned as `0.1.0`: the core document-sharing workflow is real and usable, but there are still clear pre-1.0 gaps around operator automation, broader identity workflows, and release hardening.
 
-## [0.1.0] - 2026-05-19
+## [0.1.0] - 2026-05-20
 
 ### Added
 

@@ -213,3 +213,30 @@ class ViewEvent(BaseModel):
         if event_type == EventType.PAGE_VIEW and v is None:
             raise ValueError("page_number is required for page_view events")
         return v
+
+
+class AuditLog(BaseModel):
+    """Records who did what with a share link and from where.
+
+    ip_address:
+        Raw IP address of the request.
+    device:
+        Human-readable device name parsed from User-Agent
+        e.g. 'iPhone 13 Pro / Mobile Safari'.
+    location:
+        City and country derived from IP address
+        e.g. 'Lagos, Nigeria'.
+    timestamp:
+        When the event occurred.
+    """
+
+    id: str
+    tenant_id: str
+    event_type: str
+    link_id: str
+    document_id: str
+    actor: str
+    ip_address: Optional[str] = None
+    device: Optional[str] = None
+    location: Optional[str] = None
+    timestamp: datetime

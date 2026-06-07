@@ -47,3 +47,7 @@ def get_oidc_client_service(request: Request):
 
 def get_iam_policy(request: Request):
     return request.app.state.iam_policy
+
+
+def get_audit_service(request: Request):
+    return request.app.state.audit_service

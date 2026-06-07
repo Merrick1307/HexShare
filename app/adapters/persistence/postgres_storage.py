@@ -9,11 +9,14 @@ constrain access.
 """
 from __future__ import annotations
 
+from tkinter.constants import INSERT
+
 import asyncpg  # type: ignore
 from datetime import datetime
 from typing import Iterable, Optional
 
 from app.domain import (
+    AuditLog,
     Document,
     DocumentGroup,
     DocumentPermission,
@@ -24,6 +27,8 @@ from app.domain import (
 )
 from app.infra.factories import StorageFactory
 from app.ports.storage_port import StoragePort
+
+from HexShare.app.infra.factories import AuthenticatorFactory
 
 
 class PostgresStorage(StoragePort):
@@ -550,6 +555,30 @@ class PostgresStorage(StoragePort):
             row = await con.fetchrow(sql, tenant_id, document_id, room_id)
         return self._row_to_document(row) if row else None
 
+    async def save_audit_log(self, log: AuditLog) -> None:
+        sql = """
+        INSERT INTO audit_logs (
+            id, tenant_id, event_type, link_id, document_id,
+            actor, ip_address, device, location, timestamp
+        ) VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9, $10
+        )
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(
+                sql,
+                log.id,
+                log.tenant_id,
+                log.event_type,
+                log.link_id,
+                log.document_id,
+                log.actor,
+                log.ip_address,
+                log.device,
+                log.location,
+                log.timestamp,
+            )
 
 @StorageFactory.register("postgres")
 def create_postgres_storage(*, pool, **_) -> StoragePort:

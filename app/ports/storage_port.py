@@ -15,6 +15,7 @@ from typing import Iterable, Optional
 from datetime import datetime
 
 from app.domain import (
+    AuditLog,
     Document,
     DocumentGroup,
     DocumentPermission,
@@ -22,6 +23,8 @@ from app.domain import (
     VisitorSession,
     ViewEvent,
 )
+
+from HexShare.app.domain.models import AuditLog
 
 
 class StoragePort(ABC):
@@ -190,3 +193,8 @@ class StoragePort(ABC):
         self, *, tenant_id: str, document_id: str, room_id: Optional[str]
     ) -> Optional[Document]:
         """Move a document to a group (room_id) or remove from group (room_id=None)."""
+
+
+    @abstractmethod
+    async def save_audit_log(self, log: AuditLog) -> None:
+        """Persist an audit log entry"""

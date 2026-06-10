@@ -3,6 +3,7 @@ Use cases and application services for HexShare.
 """
 
 from .analytics_service import AnalyticsService
+from .audit_service import AuditService
 from .document_processor import (
     DocumentProcessor,
     DocumentProcessingError,
@@ -20,6 +21,7 @@ from .viewer_service import ViewerService, ViewSessionDelivery
 
 __all__ = [
     "AnalyticsService",
+    "AuditService",
     "DocumentProcessor",
     "DocumentProcessingError",
     "DocumentGroupService",

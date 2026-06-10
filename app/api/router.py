@@ -10,6 +10,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.api.dependencies.services import (
     get_analytics_service,
+    get_audit_service,
     get_document_group_service,
     get_document_service,
     get_iam_policy,
@@ -32,6 +33,7 @@ from app.schemas.viewer import (
 )
 from app.services import (
     AnalyticsService,
+    AuditService,
     DocumentGroupService,
     DocumentService,
     DocumentProcessingError,
@@ -225,6 +227,7 @@ def api_router() -> APIRouter:
     @router.post("/documents/{document_id}/links", response_model=ShareLinkResponse)
     async def create_link(
         document_id: str,
+        request: Request,
         expires_in: int = Query(3600, description="Seconds until link expiry"),
         can_download: bool = Query(False),
         can_print: bool = Query(False),
@@ -233,6 +236,7 @@ def api_router() -> APIRouter:
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
+        audit_service: AuditService = Depends(get_audit_service),
     ) -> ShareLinkResponse:
         try:
             await document_service.require_document_access(
@@ -253,6 +257,14 @@ def api_router() -> APIRouter:
             can_print=can_print,
             require_email=require_email,
             allowed_emails=allowed_emails,
+        )
+        await  audit_service.log_link_created(
+            tenant_id= principal.tenant_id,
+            link_id= link.id,
+            document_id=document_id,
+            actor=principal.user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
         )
         token = await link_service.generate_share_token(link)
         return _serialize_link(link, token)
@@ -545,6 +557,7 @@ def api_router() -> APIRouter:
         request: Request,
         share_auth: ShareTokenDependency = Depends(get_share_auth),
         viewer_service: ViewerService = Depends(get_viewer_service),
+        audit_service: AuditService = Depends(get_audit_service),
     ) -> CreateViewSessionResponse:
         claims: ShareTokenClaims = share_auth(token)
         try:
@@ -553,6 +566,14 @@ def api_router() -> APIRouter:
                 document_id=claims.document_id,
                 link_id=claims.link_id,
                 email=payload.email,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+            await audit_service.log_link_accessed(
+                tenant_id=claims.tenant_id,
+                link_id=claims.link_id,
+                document_id=claims.document_id,
+                actor=payload.email,
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )

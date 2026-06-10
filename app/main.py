@@ -30,6 +30,7 @@ from app.infra.factories import (
 )
 from app.services import (
     AnalyticsService,
+    AuditService,
     DocumentProcessor,
     DocumentGroupService,
     DocumentService,
@@ -136,6 +137,7 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.link_service = link_service
     fastapi_app.state.viewer_service = viewer_service
     fastapi_app.state.analytics_service = AnalyticsService(persistence_layer)
+    fastapi_app.state.audit_service = AuditService(persistence_layer)
     fastapi_app.state.access_control = access_control
     fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
     fastapi_app.state.share_auth = ShareTokenDependency(token_port=token_adapter)

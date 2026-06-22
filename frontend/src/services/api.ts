@@ -1,4 +1,19 @@
-import { Document, DocumentAnalytics, DocumentGroup, PaginatedResponse, ShareInspection, ShareLink, ViewSession } from '../types';
+import {
+  Document,
+  DocumentAnalytics,
+  DocumentGroup,
+  DownloadUrlResponse,
+  ExternalRoomContext,
+  ExternalRoomDocumentSession,
+  ExternalRoomGrant,
+  ExternalRoomInviteInspection,
+  ExternalRoomSession,
+  PaginatedResponse,
+  ProvisionExternalRoomAccessResponse,
+  ShareInspection,
+  ShareLink,
+  ViewSession,
+} from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_APP_URL || '').replace(/\/$/, '');
 const API_PREFIX = `${API_BASE_URL}/api/v1`;
@@ -112,6 +127,67 @@ async function fetchPublic<T>(url: string, options: RequestInit = {}): Promise<T
     },
   });
   return parseResponse<T>(response);
+}
+
+async function fetchExternal<T>(url: string, options: RequestInit = {}, retried = false): Promise<T> {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    ...options,
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      ...options.headers,
+    },
+  });
+
+  if (response.status === 401 && !retried) {
+    const refreshed = await fetch(`${API_PREFIX}/external-room/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (refreshed.ok) {
+      return fetchExternal<T>(url, options, true);
+    }
+  }
+
+  return parseResponse<T>(response);
+}
+
+async function fetchExternalResponse(url: string, options: RequestInit = {}, retried = false): Promise<Response> {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    ...options,
+    credentials: 'include',
+    headers: {
+      Accept: '*/*',
+      ...options.headers,
+    },
+  });
+
+  if (response.status === 401 && !retried) {
+    const refreshed = await fetch(`${API_PREFIX}/external-room/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (refreshed.ok) {
+      return fetchExternalResponse(url, options, true);
+    }
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const payload = await response.json().catch(() => null);
+      const detail = payload?.detail;
+      if (typeof detail === 'string') throw new Error(detail);
+    }
+    const text = await response.text().catch(() => '');
+    throw new Error(text || `HTTP error ${response.status}`);
+  }
+
+  return response;
 }
 
 export const api = {
@@ -228,6 +304,8 @@ export const api = {
       can_print: boolean;
       require_email: boolean;
       allowed_emails: string[];
+      recipient_email?: string;
+      recipient_display_name?: string;
     }
   ): Promise<ShareLink> {
     const params = new URLSearchParams();
@@ -236,6 +314,8 @@ export const api = {
     if (data.can_print) params.append('can_print', 'true');
     if (data.require_email) params.append('require_email', 'true');
     data.allowed_emails.forEach((email) => params.append('allowed_emails', email));
+    if (data.recipient_email?.trim()) params.append('recipient_email', data.recipient_email.trim());
+    if (data.recipient_display_name?.trim()) params.append('recipient_display_name', data.recipient_display_name.trim());
 
     return fetchWithAuth<ShareLink>(`${API_PREFIX}/documents/${documentId}/links?${params.toString()}`, {
       method: 'POST',
@@ -342,6 +422,100 @@ export const api = {
 
   async removeGroupMember(groupId: string, userId: string): Promise<void> {
     await fetchWithAuth<void>(`${API_PREFIX}/document-groups/${groupId}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+  },
+
+  async listExternalRoomAccess(groupId: string): Promise<ExternalRoomGrant[]> {
+    return fetchWithAuth<ExternalRoomGrant[]>(`${API_PREFIX}/document-groups/${groupId}/external-access`);
+  },
+
+  async provisionExternalRoomAccess(
+    groupId: string,
+    data: {
+      recipient_email: string;
+      recipient_display_name?: string;
+      can_download: boolean;
+      can_print: boolean;
+      expires_in?: number;
+      invite_expires_in?: number;
+    }
+  ): Promise<ProvisionExternalRoomAccessResponse> {
+    const params = new URLSearchParams();
+    params.append('recipient_email', data.recipient_email.trim());
+    if (data.recipient_display_name?.trim()) params.append('recipient_display_name', data.recipient_display_name.trim());
+    if (data.can_download) params.append('can_download', 'true');
+    if (data.can_print) params.append('can_print', 'true');
+    if (typeof data.expires_in === 'number') params.append('expires_in', String(data.expires_in));
+    if (typeof data.invite_expires_in === 'number') params.append('invite_expires_in', String(data.invite_expires_in));
+    return fetchWithAuth<ProvisionExternalRoomAccessResponse>(
+      `${API_PREFIX}/document-groups/${groupId}/external-access?${params.toString()}`,
+      { method: 'POST' }
+    );
+  },
+
+  async revokeExternalRoomAccess(groupId: string, grantId: string): Promise<void> {
+    await fetchWithAuth<void>(`${API_PREFIX}/document-groups/${groupId}/external-access/${encodeURIComponent(grantId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async inspectExternalRoomInvite(token: string): Promise<ExternalRoomInviteInspection> {
+    return fetchPublic<ExternalRoomInviteInspection>(`${API_PREFIX}/external-room/invitations/${encodeURIComponent(token)}`);
+  },
+
+  async createExternalRoomSession(token: string, email: string): Promise<ExternalRoomSession> {
+    return fetchPublic<ExternalRoomSession>(`${API_PREFIX}/external-room/invitations/${encodeURIComponent(token)}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async getExternalRoomContext(): Promise<ExternalRoomContext> {
+    return fetchExternal<ExternalRoomContext>(`${API_PREFIX}/external-room/current`);
+  },
+
+  async listExternalRoomDocuments(): Promise<Document[]> {
+    return fetchExternal<Document[]>(`${API_PREFIX}/external-room/current/documents`);
+  },
+
+  async getExternalRoomDocumentDownload(documentId: string, expiresIn = 900): Promise<DownloadUrlResponse> {
+    return fetchExternal<DownloadUrlResponse>(
+      `${API_PREFIX}/external-room/current/documents/${encodeURIComponent(documentId)}/download?expires_in=${expiresIn}`
+    );
+  },
+
+  async createExternalRoomDocumentSession(documentId: string): Promise<ExternalRoomDocumentSession> {
+    return fetchExternal<ExternalRoomDocumentSession>(
+      `${API_PREFIX}/external-room/current/documents/${encodeURIComponent(documentId)}/sessions`,
+      { method: 'POST' }
+    );
+  },
+
+  async getExternalRoomDocumentSession(sessionId: string): Promise<ExternalRoomDocumentSession> {
+    return fetchExternal<ExternalRoomDocumentSession>(
+      `${API_PREFIX}/external-room/view-sessions/${encodeURIComponent(sessionId)}`
+    );
+  },
+
+  async fetchExternalRoomViewerContent(path: string): Promise<Response> {
+    return fetchExternalResponse(toAbsoluteApiUrl(path));
+  },
+
+  async closeExternalRoomDocumentSession(sessionId: string): Promise<void> {
+    await fetchExternal<void>(`${API_PREFIX}/external-room/view-sessions/${encodeURIComponent(sessionId)}/close`, {
+      method: 'POST',
+    });
+  },
+
+  async recordExternalRoomPageView(sessionId: string, pageNumber: number): Promise<void> {
+    await fetchExternal<void>(
+      `${API_PREFIX}/external-room/view-sessions/${encodeURIComponent(sessionId)}/page-view?page_number=${pageNumber}`,
+      { method: 'POST' }
+    );
+  },
+
+  async logoutExternalRoom(): Promise<void> {
+    await fetchExternal<void>(`${API_PREFIX}/external-room/logout`, { method: 'POST' });
   },
 
   async listWorkspaceUsers(page: number = 1, pageSize: number = 20, search?: string): Promise<{

@@ -18,6 +18,11 @@ from app.domain import (
     Document,
     DocumentGroup,
     DocumentPermission,
+    ExternalAccessGrant,
+    ExternalParty,
+    ExternalPartyEmail,
+    ExternalRoomEvent,
+    ExternalRoomSession,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -190,3 +195,111 @@ class StoragePort(ABC):
         self, *, tenant_id: str, document_id: str, room_id: Optional[str]
     ) -> Optional[Document]:
         """Move a document to a group (room_id) or remove from group (room_id=None)."""
+
+    @abstractmethod
+    async def save_external_party(self, party: ExternalParty) -> None:
+        """Insert or update an external party record."""
+
+    @abstractmethod
+    async def get_external_party(
+        self, *, tenant_id: str, external_party_id: str
+    ) -> Optional[ExternalParty]:
+        """Return an external party by ID."""
+
+    @abstractmethod
+    async def get_external_party_by_email(
+        self, *, tenant_id: str, email_normalized: str
+    ) -> Optional[ExternalParty]:
+        """Return the external party whose primary/known email matches."""
+
+    @abstractmethod
+    async def save_external_party_email(self, email: ExternalPartyEmail) -> None:
+        """Insert or update a party email binding."""
+
+    @abstractmethod
+    async def get_external_party_primary_email(
+        self, *, tenant_id: str, external_party_id: str
+    ) -> Optional[ExternalPartyEmail]:
+        """Return the primary email record for an external party."""
+
+    @abstractmethod
+    async def mark_external_party_email_seen(
+        self,
+        *,
+        tenant_id: str,
+        email_normalized: str,
+        seen_at: datetime,
+        verified_at: Optional[datetime] = None,
+    ) -> None:
+        """Update last-seen and optional verified timestamps for an email."""
+
+    @abstractmethod
+    async def save_external_access_grant(self, grant: ExternalAccessGrant) -> None:
+        """Insert or update an external access grant."""
+
+    @abstractmethod
+    async def get_external_access_grant(
+        self, *, tenant_id: str, grant_id: str
+    ) -> Optional[ExternalAccessGrant]:
+        """Return an external access grant by ID."""
+
+    @abstractmethod
+    async def revoke_external_access_grant(
+        self, *, tenant_id: str, grant_id: str, revoked_at: datetime
+    ) -> None:
+        """Mark an external access grant as revoked."""
+
+    @abstractmethod
+    async def list_external_access_grants(
+        self,
+        *,
+        tenant_id: str,
+        external_party_id: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ) -> Iterable[ExternalAccessGrant]:
+        """List external grants filtered by tenant and optional attributes."""
+
+    @abstractmethod
+    async def save_external_room_session(self, session: ExternalRoomSession) -> None:
+        """Persist an external room session."""
+
+    @abstractmethod
+    async def get_external_room_session(
+        self, *, tenant_id: str, session_id: str
+    ) -> Optional[ExternalRoomSession]:
+        """Return an external room session by ID."""
+
+    @abstractmethod
+    async def end_external_room_session(
+        self, *, tenant_id: str, session_id: str, ended_at: datetime
+    ) -> None:
+        """Mark an external room session as closed."""
+
+    @abstractmethod
+    async def list_external_room_sessions(
+        self, *, tenant_id: str
+    ) -> Iterable[ExternalRoomSession]:
+        """List external room sessions for a tenant."""
+
+    @abstractmethod
+    async def save_external_room_event(self, event: ExternalRoomEvent) -> None:
+        """Persist an external room audit event."""
+
+    @abstractmethod
+    async def list_external_room_events(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[ExternalRoomEvent]:
+        """List external room audit events for a document."""
+
+    @abstractmethod
+    async def get_latest_external_room_page_view_event(
+        self, *, tenant_id: str, external_room_session_id: str, document_id: str
+    ) -> Optional[ExternalRoomEvent]:
+        """Return the latest page-view event for an external room document session."""
+
+    @abstractmethod
+    async def update_external_room_event_duration(
+        self, *, tenant_id: str, event_id: str, duration_ms: int
+    ) -> None:
+        """Persist a computed duration for an existing external room event."""

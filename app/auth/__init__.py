@@ -9,9 +9,11 @@ interface to perform token validation and extract claims.
 """
 
 from .tenant_auth import TenantAuthDependency, TenantPrincipal
+from .external_room_auth import ExternalRoomAuthDependency
 from .share_token_auth import ShareTokenDependency, ShareTokenClaims
 
 __all__ = [
+    "ExternalRoomAuthDependency",
     "TenantAuthDependency",
     "TenantPrincipal",
     "ShareTokenDependency",

@@ -11,7 +11,17 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
-from app.domain import ShareLink
+from app.domain import (
+    ExternalAccessGrant,
+    ExternalAccessGrantType,
+    ExternalAccessResourceType,
+    ExternalParty,
+    ExternalPartyEmail,
+    ExternalPartyStatus,
+    ShareLink,
+    ShareLinkAccessMode,
+)
+from app.core.authz import ResourceAction
 from app.ports.storage_port import StoragePort
 from app.ports.token_port import TokenPort
 from app.ports import EventBusPort
@@ -25,6 +35,20 @@ class LinkService:
         self._token_port = token_port
         self._event_bus = event_bus
 
+    @staticmethod
+    def _normalize_email(email: str | None) -> str | None:
+        if email is None:
+            return None
+        normalized = email.strip().lower()
+        return normalized or None
+
+    @staticmethod
+    def _document_permissions(*, can_download: bool) -> int:
+        mask = int(ResourceAction.READ)
+        if can_download:
+            mask |= int(ResourceAction.EXPORT)
+        return mask
+
     async def create_share_link(
         self,
         *,
@@ -36,6 +60,8 @@ class LinkService:
         can_print: bool = False,
         require_email: bool = False,
         allowed_emails: Optional[list[str]] = None,
+        recipient_email: str | None = None,
+        recipient_display_name: str | None = None,
     ) -> ShareLink:
         """Create a new share link and return its record.
 
@@ -46,7 +72,74 @@ class LinkService:
         """
         link_id = self._storage.generate_id("link")
         jti = self._token_port.generate_jti()
-        expires_at = datetime.utcnow() + timedelta(seconds=expires_in_seconds)
+        now = datetime.utcnow()
+        expires_at = now + timedelta(seconds=expires_in_seconds)
+        normalized_recipient_email = self._normalize_email(recipient_email)
+        recipient_label = (recipient_display_name or "").strip() or None
+        external_access_grant_id: str | None = None
+        access_mode = ShareLinkAccessMode.ANONYMOUS
+        bound_email_normalized: str | None = None
+
+        if normalized_recipient_email:
+            require_email = True
+            allowed_emails = [normalized_recipient_email]
+            access_mode = ShareLinkAccessMode.IDENTIFIED
+            bound_email_normalized = normalized_recipient_email
+
+            external_party = await self._storage.get_external_party_by_email(
+                tenant_id=tenant_id,
+                email_normalized=normalized_recipient_email,
+            )
+            if external_party is None:
+                external_party = ExternalParty(
+                    id=self._storage.generate_id("ep"),
+                    tenant_id=tenant_id,
+                    display_name=recipient_label,
+                    status=ExternalPartyStatus.ACTIVE,
+                    created_by=created_by,
+                    created_at=now,
+                    updated_at=now,
+                    archived_at=None,
+                )
+            elif recipient_label and external_party.display_name != recipient_label:
+                external_party = external_party.copy(
+                    update={"display_name": recipient_label, "updated_at": now}
+                )
+            await self._storage.save_external_party(external_party)
+            await self._storage.save_external_party_email(
+                ExternalPartyEmail(
+                    id=self._storage.generate_id("epe"),
+                    tenant_id=tenant_id,
+                    external_party_id=external_party.id,
+                    email_normalized=normalized_recipient_email,
+                    email_original=recipient_email or normalized_recipient_email,
+                    is_primary=True,
+                    verified_at=None,
+                    last_seen_at=None,
+                    created_at=now,
+                )
+            )
+
+            external_access_grant_id = self._storage.generate_id("eag")
+            await self._storage.save_external_access_grant(
+                ExternalAccessGrant(
+                    id=external_access_grant_id,
+                    tenant_id=tenant_id,
+                    external_party_id=external_party.id,
+                    resource_type=ExternalAccessResourceType.DOCUMENT,
+                    resource_id=document_id,
+                    grant_type=ExternalAccessGrantType.LINK,
+                    permissions=self._document_permissions(can_download=can_download),
+                    can_download=can_download,
+                    can_print=can_print,
+                    expires_at=expires_at,
+                    revoked_at=None,
+                    granted_by=created_by,
+                    granted_at=now,
+                    updated_at=now,
+                )
+            )
+
         share_link = ShareLink(
             id=link_id,
             tenant_id=tenant_id,
@@ -57,8 +150,11 @@ class LinkService:
             can_print=can_print,
             require_email=require_email,
             allowed_emails=allowed_emails or [],
+            external_access_grant_id=external_access_grant_id,
+            access_mode=access_mode,
+            bound_email_normalized=bound_email_normalized,
             revoked_at=None,
-            created_at=datetime.utcnow(),
+            created_at=now,
             created_by=created_by,
         )
         await self._storage.save_share_link(share_link)
@@ -102,6 +198,12 @@ class LinkService:
         now = datetime.utcnow()
         # Persist revocation on the link record
         await self._storage.revoke_share_link(tenant_id=tenant_id, link_id=link_id, revoked_at=now)
+        if link.external_access_grant_id:
+            await self._storage.revoke_external_access_grant(
+                tenant_id=tenant_id,
+                grant_id=link.external_access_grant_id,
+                revoked_at=now,
+            )
         # Record the JTI in the revocation set so tokens are invalidated
         await self._token_port.revoke_jti(link.jti, expires_at=link.expires_at)
         await self._event_bus.publish_event(

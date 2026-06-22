@@ -19,6 +19,7 @@ from app.api.uploads import router as uploads_router
 from app.api.user import router as user_router
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import TenantAuthDependency
+from app.auth.external_room_auth import ExternalRoomAuthDependency
 from app.infra.factories import (
     AccessControlFactory,
     AuthenticatorFactory,
@@ -33,6 +34,8 @@ from app.services import (
     DocumentProcessor,
     DocumentGroupService,
     DocumentService,
+    ExternalRoomAccessService,
+    ExternalRoomViewerService,
     LinkService,
     UploadService,
     ViewerService,
@@ -101,6 +104,7 @@ async def lifespan(fastapi_app: FastAPI):
     document_service = DocumentService(persistence_layer, event_bus)
     document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
+    external_room_access_service = ExternalRoomAccessService(storage=persistence_layer)
     document_processor = DocumentProcessor()
     max_upload = os.getenv("HEXSHARE_MAX_UPLOAD_SIZE_BYTES")
     upload_service = UploadService(
@@ -118,6 +122,13 @@ async def lifespan(fastapi_app: FastAPI):
         document_service=document_service,
         link_service=link_service,
     )
+    external_room_viewer_service = ExternalRoomViewerService(
+        storage=persistence_layer,
+        object_storage=object_storage,
+        rendered_page_cache=rendered_page_cache,
+        document_processor=document_processor,
+        document_service=document_service,
+    )
 
     fastapi_app.state.pool = dp_pool
     fastapi_app.state.storage = persistence_layer
@@ -134,11 +145,14 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.iam_policy = iam_policy
     fastapi_app.state.upload_service = upload_service
     fastapi_app.state.link_service = link_service
+    fastapi_app.state.external_room_access_service = external_room_access_service
+    fastapi_app.state.external_room_viewer_service = external_room_viewer_service
     fastapi_app.state.viewer_service = viewer_service
     fastapi_app.state.analytics_service = AnalyticsService(persistence_layer)
     fastapi_app.state.access_control = access_control
     fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
     fastapi_app.state.share_auth = ShareTokenDependency(token_port=token_adapter)
+    fastapi_app.state.external_room_auth = ExternalRoomAuthDependency(service=external_room_access_service)
     hexiam_url = os.getenv("HEXIAM_URL", "").strip()
     hexiam_client_id = os.getenv("HEXSHARE_CLIENT_ID") or os.getenv("HEXSHARE_PDP_CLIENT_ID", "")
     hexiam_client_secret = os.getenv("HEXSHARE_CLIENT_SECRET") or os.getenv("HEXSHARE_PDP_CLIENT_SECRET", "")

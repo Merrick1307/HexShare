@@ -1,21 +1,44 @@
 import type { FormEvent } from 'react';
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { ArrowLeft, FileText, Upload, Folder, UserPlus, Search, ChevronLeft, ChevronRight, FolderOutput } from 'lucide-react';
+import {
+  ArrowLeft,
+  Copy,
+  ExternalLink,
+  FileText,
+  Folder,
+  FolderOutput,
+  Mail,
+  Search,
+  Shield,
+  Trash2,
+  Upload,
+  UserPlus,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { api } from '../services/api';
-import { Document, DocumentGroup } from '../types';
+import { Document, DocumentGroup, ExternalRoomGrant, ProvisionExternalRoomAccessResponse } from '../types';
 import { formatBytes } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { Badge } from '../components/ui/Badge';
 
 type WorkspaceUser = { id: string; user_id?: string; email?: string; name?: string; username?: string };
+
+function statusForGrant(grant: ExternalRoomGrant) {
+  if (grant.revoked_at) return { label: 'Revoked', variant: 'danger' as const };
+  if (grant.expires_at && new Date(grant.expires_at) <= new Date()) return { label: 'Expired', variant: 'warning' as const };
+  return { label: 'Active', variant: 'success' as const };
+}
 
 export function GroupDetails() {
   const { id } = useParams<{ id: string }>();
   const [group, setGroup] = useState<DocumentGroup | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [externalAccess, setExternalAccess] = useState<ExternalRoomGrant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -23,6 +46,7 @@ export function GroupDetails() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [isExternalAccessModalOpen, setIsExternalAccessModalOpen] = useState(false);
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState<'member' | 'owner'>('member');
   const [memberError, setMemberError] = useState<string | null>(null);
@@ -31,6 +55,15 @@ export function GroupDetails() {
   const [usersPage, setUsersPage] = useState(1);
   const [usersSearch, setUsersSearch] = useState('');
   const [usersLoading, setUsersLoading] = useState(false);
+  const [externalAccessError, setExternalAccessError] = useState<string | null>(null);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [recipientDisplayName, setRecipientDisplayName] = useState('');
+  const [externalCanDownload, setExternalCanDownload] = useState(false);
+  const [externalCanPrint, setExternalCanPrint] = useState(false);
+  const [externalGrantDays, setExternalGrantDays] = useState(14);
+  const [externalInviteDays, setExternalInviteDays] = useState(7);
+  const [latestProvision, setLatestProvision] = useState<ProvisionExternalRoomAccessResponse | null>(null);
+  const [copiedValue, setCopiedValue] = useState<string | null>(null);
   const PAGE_SIZE = 10;
 
   const loadData = useCallback(async () => {
@@ -38,12 +71,14 @@ export function GroupDetails() {
     setIsLoading(true);
     setError(null);
     try {
-      const [groupData, docs] = await Promise.all([
+      const [groupData, docs, grants] = await Promise.all([
         api.getGroup(id),
         api.listGroupDocuments(id),
+        api.listExternalRoomAccess(id),
       ]);
       setGroup(groupData);
       setDocuments(docs);
+      setExternalAccess(grants);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load group');
     } finally {
@@ -83,6 +118,11 @@ export function GroupDetails() {
 
   const totalPages = Math.ceil(usersTotal / PAGE_SIZE);
 
+  const activeExternalAccessCount = useMemo(
+    () => externalAccess.filter((grant) => !grant.revoked_at && (!grant.expires_at || new Date(grant.expires_at) > new Date())).length,
+    [externalAccess]
+  );
+
   function openMemberModal() {
     setMemberUserId('');
     setMemberRole('member');
@@ -90,6 +130,18 @@ export function GroupDetails() {
     setUsersPage(1);
     setUsersSearch('');
     setIsMemberModalOpen(true);
+  }
+
+  function openExternalAccessModal() {
+    setRecipientEmail('');
+    setRecipientDisplayName('');
+    setExternalCanDownload(false);
+    setExternalCanPrint(false);
+    setExternalGrantDays(14);
+    setExternalInviteDays(7);
+    setExternalAccessError(null);
+    setLatestProvision(null);
+    setIsExternalAccessModalOpen(true);
   }
 
   async function handleUpload(e: FormEvent<HTMLFormElement>) {
@@ -136,9 +188,49 @@ export function GroupDetails() {
       setIsMemberModalOpen(false);
       setMemberUserId('');
       setMemberRole('member');
-      setSuccessMessage(`Member added successfully.`);
+      setSuccessMessage('Member added successfully.');
     } catch (err) {
       setMemberError(err instanceof Error ? err.message : 'Failed to add member');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleProvisionExternalAccess() {
+    if (!id || !recipientEmail.trim()) return;
+    setExternalAccessError(null);
+    setIsSubmitting(true);
+    try {
+      const provision = await api.provisionExternalRoomAccess(id, {
+        recipient_email: recipientEmail.trim(),
+        recipient_display_name: recipientDisplayName.trim() || undefined,
+        can_download: externalCanDownload,
+        can_print: externalCanPrint,
+        expires_in: externalGrantDays > 0 ? externalGrantDays * 24 * 60 * 60 : undefined,
+        invite_expires_in: externalInviteDays * 24 * 60 * 60,
+      });
+      setLatestProvision(provision);
+      setSuccessMessage('External room access provisioned.');
+      setExternalAccess(await api.listExternalRoomAccess(id));
+    } catch (err) {
+      setExternalAccessError(err instanceof Error ? err.message : 'Failed to provision external access');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRevokeExternalAccess(grant: ExternalRoomGrant) {
+    if (!id) return;
+    const label = grant.display_name || grant.email;
+    if (!confirm(`Revoke external room access for "${label}"?`)) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await api.revokeExternalRoomAccess(id, grant.grant_id);
+      setSuccessMessage('External room access revoked.');
+      setExternalAccess(await api.listExternalRoomAccess(id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke external access');
     } finally {
       setIsSubmitting(false);
     }
@@ -158,6 +250,12 @@ export function GroupDetails() {
     }
   }
 
+  async function copyToClipboard(value: string) {
+    await navigator.clipboard.writeText(value);
+    setCopiedValue(value);
+    window.setTimeout(() => setCopiedValue(null), 1500);
+  }
+
   if (isLoading) {
     return <div className="py-12 text-center text-zinc-500">Loading...</div>;
   }
@@ -172,6 +270,8 @@ export function GroupDetails() {
       </div>
     );
   }
+
+  const latestInviteUrl = latestProvision ? api.toAbsoluteFrontendUrl(latestProvision.invite_path) : null;
 
   return (
     <div className="space-y-8">
@@ -191,10 +291,14 @@ export function GroupDetails() {
             {group.description && <p className="mt-1 text-sm text-zinc-500">{group.description}</p>}
           </div>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Button variant="outline" onClick={openMemberModal} className="gap-2">
             <UserPlus className="h-4 w-4" />
             Add Member
+          </Button>
+          <Button variant="outline" onClick={openExternalAccessModal} className="gap-2">
+            <Mail className="h-4 w-4" />
+            Invite External
           </Button>
           <Button onClick={() => setIsUploadModalOpen(true)} className="gap-2">
             <Upload className="h-4 w-4" />
@@ -204,6 +308,30 @@ export function GroupDetails() {
       </div>
 
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
+
+      {latestProvision && latestInviteUrl ? (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-4 text-sm text-indigo-900">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-1">
+              <p className="font-medium">Invitation ready</p>
+              <p>
+                {latestProvision.display_name || latestProvision.email} can bootstrap room access with this invitation URL.
+              </p>
+              <p className="break-all font-mono text-xs text-indigo-800">{latestInviteUrl}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => void copyToClipboard(latestInviteUrl)}>
+                <Copy className="mr-2 h-4 w-4" />
+                {copiedValue === latestInviteUrl ? 'Copied' : 'Copy'}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => window.open(latestInviteUrl, '_blank', 'noopener,noreferrer')}>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="overflow-visible rounded-xl border border-zinc-200 bg-white shadow-sm">
         <table className="w-full text-left text-sm">
@@ -261,6 +389,90 @@ export function GroupDetails() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-5">
+          <div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-zinc-950">External access</h2>
+              <Badge variant={activeExternalAccessCount > 0 ? 'success' : 'neutral'}>{activeExternalAccessCount} active</Badge>
+            </div>
+            <p className="mt-1 text-sm text-zinc-500">
+              Provisioned room access for external recipients. Each recipient gets an invitation bootstrap and a room-scoped session.
+            </p>
+          </div>
+          <Button onClick={openExternalAccessModal} className="gap-2">
+            <Mail className="h-4 w-4" />
+            Invite External
+          </Button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
+              <tr>
+                <th className="px-6 py-4">Recipient</th>
+                <th className="px-6 py-4">Access</th>
+                <th className="px-6 py-4">Grant window</th>
+                <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-200">
+              {externalAccess.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
+                    <div className="flex flex-col items-center justify-center">
+                      <Shield className="mb-3 h-10 w-10 text-zinc-300" />
+                      <p className="text-base font-medium text-zinc-900">No external room access yet</p>
+                      <p className="mt-1 text-sm">Invite a recipient to provision a room-scoped external session.</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                externalAccess.map((grant) => {
+                  const status = statusForGrant(grant);
+                  return (
+                    <tr key={grant.grant_id} className="transition-colors hover:bg-zinc-50/50">
+                      <td className="px-6 py-4">
+                        <div className="space-y-1">
+                          <p className="font-medium text-zinc-900">{grant.display_name || 'Unnamed recipient'}</p>
+                          <p className="text-xs text-zinc-500">{grant.email}</p>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="neutral">Room read</Badge>
+                          {grant.can_download ? <Badge variant="neutral">Download</Badge> : null}
+                          {grant.can_print ? <Badge variant="neutral">Print</Badge> : null}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-zinc-600">
+                        <div className="space-y-1">
+                          <p>Granted {format(new Date(grant.granted_at), 'MMM d, yyyy')}</p>
+                          <p className="text-xs text-zinc-500">
+                            {grant.expires_at ? `Expires ${format(new Date(grant.expires_at), 'MMM d, yyyy h:mm a')}` : 'No grant expiry'}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {!grant.revoked_at ? (
+                          <Button type="button" variant="outline" size="sm" onClick={() => void handleRevokeExternalAccess(grant)}>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Revoke
+                          </Button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="Upload to Group">
@@ -365,6 +577,77 @@ export function GroupDetails() {
             <Button type="button" variant="outline" onClick={() => setIsMemberModalOpen(false)}>Cancel</Button>
             <Button type="button" onClick={handleAddMember} disabled={isSubmitting || !memberUserId.trim()}>
               {isSubmitting ? 'Adding...' : 'Add Member'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isExternalAccessModalOpen} onClose={() => setIsExternalAccessModalOpen(false)} title="Provision external room access">
+        <div className="space-y-6">
+          {externalAccessError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{externalAccessError}</div>}
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-zinc-900">Recipient email</label>
+            <Input
+              type="email"
+              placeholder="james@example.com"
+              value={recipientEmail}
+              onChange={(e) => setRecipientEmail(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-zinc-900">Display name</label>
+            <Input
+              placeholder="James Okafor"
+              value={recipientDisplayName}
+              onChange={(e) => setRecipientDisplayName(e.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-900">Grant expiry (days)</label>
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={externalGrantDays}
+                onChange={(e) => setExternalGrantDays(Number(e.target.value) || 1)}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-900">Invite expiry (days)</label>
+              <Input
+                type="number"
+                min={1}
+                max={30}
+                value={externalInviteDays}
+                onChange={(e) => setExternalInviteDays(Number(e.target.value) || 1)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-zinc-900">Permissions</label>
+            <label className="flex items-center gap-3 text-sm text-zinc-700">
+              <input type="checkbox" checked={externalCanDownload} onChange={(e) => setExternalCanDownload(e.target.checked)} />
+              <span>Allow document download inside this room</span>
+            </label>
+            <label className="flex items-center gap-3 text-sm text-zinc-700">
+              <input type="checkbox" checked={externalCanPrint} onChange={(e) => setExternalCanPrint(e.target.checked)} />
+              <span>Allow print flag on the grant</span>
+            </label>
+          </div>
+
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
+            The invitation URL only bootstraps the room session. Durable access stays on the provisioned room grant.
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsExternalAccessModalOpen(false)}>Cancel</Button>
+            <Button type="button" onClick={handleProvisionExternalAccess} disabled={isSubmitting || !recipientEmail.trim()}>
+              {isSubmitting ? 'Provisioning...' : 'Provision access'}
             </Button>
           </div>
         </div>

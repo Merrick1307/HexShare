@@ -15,6 +15,8 @@ class ShareLinkResponse(BaseModel):
     can_print: bool = False
     require_email: bool = False
     allowed_emails: list[str] = Field(default_factory=list)
+    access_mode: str = "anonymous"
+    bound_email_normalized: str | None = None
     revoked_at: datetime | None = None
     created_at: datetime
     created_by: str

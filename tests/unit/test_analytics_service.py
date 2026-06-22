@@ -4,20 +4,34 @@ from datetime import datetime
 
 import pytest
 
-from app.domain import EventType, ViewEvent, VisitorSession
+from app.domain import EventType, ExternalRoomEvent, ExternalRoomEventType, ExternalRoomSession, ViewEvent, VisitorSession
 from app.services.analytics_service import AnalyticsService
 
 
 class _StorageStub:
-    def __init__(self, sessions: list[VisitorSession], events: list[ViewEvent]) -> None:
+    def __init__(
+        self,
+        sessions: list[VisitorSession],
+        events: list[ViewEvent],
+        external_room_sessions: list[ExternalRoomSession] | None = None,
+        external_room_events: list[ExternalRoomEvent] | None = None,
+    ) -> None:
         self.sessions = sessions
         self.events = events
+        self.external_room_sessions = external_room_sessions or []
+        self.external_room_events = external_room_events or []
 
     async def list_visitor_sessions(self, *, tenant_id: str, document_id: str):
         return self.sessions
 
     async def list_view_events(self, *, tenant_id: str, document_id: str):
         return self.events
+
+    async def list_external_room_sessions(self, *, tenant_id: str):
+        return self.external_room_sessions
+
+    async def list_external_room_events(self, *, tenant_id: str, document_id: str):
+        return self.external_room_events
 
 
 @pytest.mark.asyncio
@@ -127,4 +141,78 @@ async def test_get_document_metrics_uses_sessions_for_views_and_builds_page_stat
             "total_duration_ms": 3000,
             "avg_duration_ms": 1500,
         },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_document_metrics_includes_external_room_page_views():
+    external_room_sessions = [
+        ExternalRoomSession(
+            id="ers_1",
+            tenant_id="tenant-1",
+            external_party_id="ep_1",
+            external_access_grant_id="eag_1",
+            room_id="dcgrp_room1",
+            permissions=1,
+            presented_email="roomviewer@example.com",
+            started_at=datetime(2026, 5, 16, 13, 0, 0),
+            ended_at=datetime(2026, 5, 16, 13, 10, 0),
+        )
+    ]
+    external_room_events = [
+        ExternalRoomEvent(
+            id="ere_1",
+            tenant_id="tenant-1",
+            external_room_session_id="ers_1",
+            room_id="dcgrp_room1",
+            event_type=ExternalRoomEventType.DOCUMENT_VIEW_OPEN,
+            document_id="doc-1",
+            timestamp=datetime(2026, 5, 16, 13, 0, 0),
+        ),
+        ExternalRoomEvent(
+            id="ere_2",
+            tenant_id="tenant-1",
+            external_room_session_id="ers_1",
+            room_id="dcgrp_room1",
+            event_type=ExternalRoomEventType.DOCUMENT_PAGE_VIEW,
+            document_id="doc-1",
+            page_number=3,
+            duration_ms=5000,
+            timestamp=datetime(2026, 5, 16, 13, 0, 5),
+        ),
+        ExternalRoomEvent(
+            id="ere_3",
+            tenant_id="tenant-1",
+            external_room_session_id="ers_1",
+            room_id="dcgrp_room1",
+            event_type=ExternalRoomEventType.DOCUMENT_VIEW_CLOSE,
+            document_id="doc-1",
+            timestamp=datetime(2026, 5, 16, 13, 0, 8),
+        ),
+    ]
+
+    service = AnalyticsService(
+        _StorageStub(
+            sessions=[],
+            events=[],
+            external_room_sessions=external_room_sessions,
+            external_room_events=external_room_events,
+        )  # type: ignore[arg-type]
+    )
+
+    metrics = await service.get_document_metrics(tenant_id="tenant-1", document_id="doc-1")
+
+    assert metrics["unique_visitors"] == 1
+    assert metrics["total_views"] == 1
+    assert metrics["total_sessions"] == 1
+    assert metrics["page_views"] == 1
+    assert metrics["total_time_ms"] == 5000
+    assert metrics["avg_session_duration_ms"] == 8000
+    assert metrics["pages"] == [
+        {
+            "page_number": 3,
+            "view_count": 1,
+            "total_duration_ms": 5000,
+            "avg_duration_ms": 5000,
+        }
     ]

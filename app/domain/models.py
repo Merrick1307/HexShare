@@ -7,7 +7,7 @@ models here intentionally avoid any business logic; they are simple
 containers for data.  Business rules live in services and domain logic.
 
 If your environment doesn't include Pydantic, install it with
-``pip install pydantic``.  HexShare's domain models can be converted to
+``poetry add pydantic``.  HexShare's domain models can be converted to
 and from dictionaries for storage or network transport.
 """
 from __future__ import annotations
@@ -48,6 +48,38 @@ class EventType(str, Enum):
     CLOSE = "close"
     DOWNLOAD_ATTEMPT = "download_attempt"
     BLOCKED = "blocked"
+
+
+class ExternalPartyStatus(str, Enum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    ARCHIVED = "archived"
+    BLOCKED = "blocked"
+
+
+class ExternalAccessResourceType(str, Enum):
+    DOCUMENT = "document"
+    ROOM = "room"
+
+
+class ExternalAccessGrantType(str, Enum):
+    LINK = "link"
+    PROVISIONED = "provisioned"
+
+
+class ShareLinkAccessMode(str, Enum):
+    ANONYMOUS = "anonymous"
+    IDENTIFIED = "identified"
+
+
+class ExternalRoomEventType(str, Enum):
+    ROOM_OPEN = "room_open"
+    DOCUMENT_LIST = "document_list"
+    DOCUMENT_VIEW_OPEN = "document_view_open"
+    DOCUMENT_PAGE_VIEW = "document_page_view"
+    DOCUMENT_VIEW_CLOSE = "document_view_close"
+    DOCUMENT_DOWNLOAD = "document_download"
+    ROOM_CLOSE = "room_close"
 
 
 class Document(BaseModel):
@@ -162,6 +194,9 @@ class ShareLink(BaseModel):
     can_print: bool = False
     require_email: bool = False
     allowed_emails: Optional[List[str]] = None
+    external_access_grant_id: Optional[str] = None
+    access_mode: ShareLinkAccessMode = ShareLinkAccessMode.ANONYMOUS
+    bound_email_normalized: Optional[str] = None
     revoked_at: Optional[datetime] = None
     created_at: datetime
     created_by: str
@@ -183,10 +218,87 @@ class VisitorSession(BaseModel):
     tenant_id: str
     share_link_id: str
     visitor_id: Optional[str] = None
+    external_party_id: Optional[str] = None
+    external_access_grant_id: Optional[str] = None
+    presented_email: Optional[str] = None
+    identity_source: Optional[str] = None
     ip_hash: Optional[str] = None
     ua_hash: Optional[str] = None
     started_at: datetime
     ended_at: Optional[datetime] = None
+
+
+class ExternalParty(BaseModel):
+    id: str
+    tenant_id: str
+    display_name: Optional[str] = None
+    status: ExternalPartyStatus = ExternalPartyStatus.ACTIVE
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    archived_at: Optional[datetime] = None
+
+
+class ExternalPartyEmail(BaseModel):
+    id: str
+    tenant_id: str
+    external_party_id: str
+    email_normalized: str
+    email_original: str
+    is_primary: bool = True
+    verified_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class ExternalAccessGrant(BaseModel):
+    id: str
+    tenant_id: str
+    external_party_id: str
+    resource_type: ExternalAccessResourceType
+    resource_id: str
+    grant_type: ExternalAccessGrantType
+    permissions: int = 0
+    can_download: bool = False
+    can_print: bool = False
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    granted_by: str
+    granted_at: datetime
+    updated_at: datetime
+
+
+class ExternalRoomSession(BaseModel):
+    id: str
+    tenant_id: str
+    external_party_id: str
+    external_access_grant_id: str
+    room_id: str
+    permissions: int = 0
+    presented_email: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    ip_hash: Optional[str] = None
+    ua_hash: Optional[str] = None
+
+
+class ExternalRoomEvent(BaseModel):
+    id: str
+    tenant_id: str
+    external_room_session_id: str
+    room_id: str
+    event_type: ExternalRoomEventType
+    document_id: Optional[str] = None
+    page_number: Optional[int] = None
+    duration_ms: Optional[int] = None
+    timestamp: datetime
+
+    @validator("page_number", always=True)
+    def validate_page_number(cls, v, values):  # type: ignore[override]
+        event_type = values.get("event_type")
+        if event_type == ExternalRoomEventType.DOCUMENT_PAGE_VIEW and v is None:
+            raise ValueError("page_number is required for document_page_view events")
+        return v
 
 
 class ViewEvent(BaseModel):

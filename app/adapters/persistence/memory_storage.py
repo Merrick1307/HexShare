@@ -18,6 +18,11 @@ from app.domain import (
     DocumentGroup,
     DocumentPermission,
     EventType,
+    ExternalAccessGrant,
+    ExternalParty,
+    ExternalPartyEmail,
+    ExternalRoomEvent,
+    ExternalRoomSession,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -39,6 +44,12 @@ class MemoryStorage(StoragePort):
         )
         # tenant_id -> {group_id: DocumentGroup}
         self._doc_groups: Dict[str, Dict[str, DocumentGroup]] = defaultdict(dict)
+        self._external_parties: Dict[str, Dict[str, ExternalParty]] = defaultdict(dict)
+        self._external_party_by_email: Dict[str, Dict[str, str]] = defaultdict(dict)
+        self._external_party_emails: Dict[str, Dict[str, ExternalPartyEmail]] = defaultdict(dict)
+        self._external_access_grants: Dict[str, Dict[str, ExternalAccessGrant]] = defaultdict(dict)
+        self._external_room_sessions: Dict[str, Dict[str, ExternalRoomSession]] = defaultdict(dict)
+        self._external_room_events: Dict[str, List[ExternalRoomEvent]] = defaultdict(list)
         self._id_counter = 0
 
     def generate_id(self, prefix: str) -> str:
@@ -243,6 +254,143 @@ class MemoryStorage(StoragePort):
         updated = doc.copy(update={"room_id": room_id})
         docs[document_id] = updated
         return updated
+
+    async def save_external_party(self, party: ExternalParty) -> None:
+        self._external_parties[party.tenant_id][party.id] = party
+
+    async def get_external_party(
+        self, *, tenant_id: str, external_party_id: str
+    ) -> Optional[ExternalParty]:
+        return self._external_parties.get(tenant_id, {}).get(external_party_id)
+
+    async def get_external_party_by_email(
+        self, *, tenant_id: str, email_normalized: str
+    ) -> Optional[ExternalParty]:
+        party_id = self._external_party_by_email.get(tenant_id, {}).get(email_normalized)
+        if not party_id:
+            return None
+        return self._external_parties.get(tenant_id, {}).get(party_id)
+
+    async def save_external_party_email(self, email: ExternalPartyEmail) -> None:
+        self._external_party_emails[email.tenant_id][email.id] = email
+        self._external_party_by_email[email.tenant_id][email.email_normalized] = email.external_party_id
+
+    async def get_external_party_primary_email(
+        self, *, tenant_id: str, external_party_id: str
+    ) -> Optional[ExternalPartyEmail]:
+        for record in self._external_party_emails.get(tenant_id, {}).values():
+            if record.external_party_id == external_party_id and record.is_primary:
+                return record
+        return None
+
+    async def mark_external_party_email_seen(
+        self,
+        *,
+        tenant_id: str,
+        email_normalized: str,
+        seen_at: datetime,
+        verified_at: Optional[datetime] = None,
+    ) -> None:
+        for email_id, record in self._external_party_emails.get(tenant_id, {}).items():
+            if record.email_normalized != email_normalized:
+                continue
+            self._external_party_emails[tenant_id][email_id] = record.copy(
+                update={
+                    "last_seen_at": seen_at,
+                    "verified_at": verified_at if verified_at is not None else record.verified_at,
+                }
+            )
+            return
+
+    async def save_external_access_grant(self, grant: ExternalAccessGrant) -> None:
+        self._external_access_grants[grant.tenant_id][grant.id] = grant
+
+    async def get_external_access_grant(
+        self, *, tenant_id: str, grant_id: str
+    ) -> Optional[ExternalAccessGrant]:
+        return self._external_access_grants.get(tenant_id, {}).get(grant_id)
+
+    async def revoke_external_access_grant(
+        self, *, tenant_id: str, grant_id: str, revoked_at: datetime
+    ) -> None:
+        existing = self._external_access_grants.get(tenant_id, {}).get(grant_id)
+        if existing:
+            self._external_access_grants[tenant_id][grant_id] = existing.copy(
+                update={"revoked_at": revoked_at, "updated_at": revoked_at}
+            )
+
+    async def list_external_access_grants(
+        self,
+        *,
+        tenant_id: str,
+        external_party_id: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ) -> Iterable[ExternalAccessGrant]:
+        grants = list(self._external_access_grants.get(tenant_id, {}).values())
+        if external_party_id is not None:
+            grants = [grant for grant in grants if grant.external_party_id == external_party_id]
+        if resource_type is not None:
+            grants = [grant for grant in grants if grant.resource_type.value == resource_type]
+        if resource_id is not None:
+            grants = [grant for grant in grants if grant.resource_id == resource_id]
+        return grants
+
+    async def save_external_room_session(self, session: ExternalRoomSession) -> None:
+        self._external_room_sessions[session.tenant_id][session.id] = session
+
+    async def get_external_room_session(
+        self, *, tenant_id: str, session_id: str
+    ) -> Optional[ExternalRoomSession]:
+        return self._external_room_sessions.get(tenant_id, {}).get(session_id)
+
+    async def end_external_room_session(
+        self, *, tenant_id: str, session_id: str, ended_at: datetime
+    ) -> None:
+        session = self._external_room_sessions.get(tenant_id, {}).get(session_id)
+        if session is not None:
+            self._external_room_sessions[tenant_id][session_id] = session.copy(
+                update={"ended_at": ended_at}
+            )
+
+    async def list_external_room_sessions(
+        self, *, tenant_id: str
+    ) -> Iterable[ExternalRoomSession]:
+        return list(self._external_room_sessions.get(tenant_id, {}).values())
+
+    async def save_external_room_event(self, event: ExternalRoomEvent) -> None:
+        self._external_room_events[event.tenant_id].append(event)
+
+    async def list_external_room_events(
+        self, *, tenant_id: str, document_id: str
+    ) -> Iterable[ExternalRoomEvent]:
+        return [
+            event
+            for event in self._external_room_events.get(tenant_id, [])
+            if event.document_id == document_id
+        ]
+
+    async def get_latest_external_room_page_view_event(
+        self, *, tenant_id: str, external_room_session_id: str, document_id: str
+    ) -> Optional[ExternalRoomEvent]:
+        page_events = [
+            event
+            for event in self._external_room_events.get(tenant_id, [])
+            if event.external_room_session_id == external_room_session_id
+            and event.document_id == document_id
+            and event.event_type == "document_page_view"
+        ]
+        if not page_events:
+            return None
+        return max(page_events, key=lambda event: event.timestamp)
+
+    async def update_external_room_event_duration(
+        self, *, tenant_id: str, event_id: str, duration_ms: int
+    ) -> None:
+        for index, event in enumerate(self._external_room_events.get(tenant_id, [])):
+            if event.id == event_id:
+                self._external_room_events[tenant_id][index] = event.copy(update={"duration_ms": duration_ms})
+                return
 
 
 @StorageFactory.register("memory")

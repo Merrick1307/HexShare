@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -12,19 +13,33 @@ from app.api.dependencies.services import (
     get_analytics_service,
     get_document_group_service,
     get_document_service,
+    get_external_room_access_service,
+    get_external_room_viewer_service,
     get_iam_policy,
     get_link_service,
     get_share_auth,
+    get_upload_service,
     get_viewer_service,
 )
 from app.auth import ShareTokenClaims, TenantPrincipal
+from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
-from app.core.authz import ResourceAction
+from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
 from app.domain import Document, DocumentGroup, ShareLink
 from app.ports.access_control import AccessDenied
+from app.schemas.external_room import (
+    CreateExternalRoomSessionRequest,
+    ExternalRoomContextResponse,
+    ExternalRoomDocumentSessionResponse,
+    ExternalRoomGrantResponse,
+    ExternalRoomInviteInspectionResponse,
+    ExternalRoomSessionResponse,
+    ProvisionExternalRoomAccessResponse,
+)
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.share import ShareLinkResponse
+from app.schemas.upload import DownloadUrlResponse
 from app.schemas.viewer import (
     CreateViewSessionRequest,
     CreateViewSessionResponse,
@@ -35,7 +50,12 @@ from app.services import (
     DocumentGroupService,
     DocumentService,
     DocumentProcessingError,
+    ExternalRoomAccessService,
+    ExternalRoomDocumentSessionDelivery,
+    ExternalRoomPrincipal,
+    ExternalRoomViewerService,
     LinkService,
+    UploadService,
     ViewerService,
 )
 
@@ -46,6 +66,13 @@ def _utcnow() -> datetime:
 
 async def _stream_bytes(content: bytes):
     yield content
+
+
+def _secure_cookie(request: Request) -> bool:
+    public = (os.getenv("HEXSHARE_PUBLIC_URL") or "").strip()
+    if public.startswith("https://"):
+        return True
+    return request.url.scheme == "https"
 
 
 def _apply_viewer_headers(response: StreamingResponse, *, filename: str, disposition: str) -> StreamingResponse:
@@ -75,11 +102,57 @@ def _serialize_link(link: ShareLink, token: str) -> ShareLinkResponse:
         can_print=link.can_print,
         require_email=link.require_email,
         allowed_emails=list(link.allowed_emails or []),
+        access_mode=link.access_mode.value,
+        bound_email_normalized=link.bound_email_normalized,
         revoked_at=link.revoked_at,
         created_at=link.created_at,
         created_by=link.created_by,
         share_token=token,
         share_path=f"/view/{token}",
+    )
+
+
+def external_room_document_watermark(principal: ExternalRoomPrincipal) -> str:
+    identifier = principal.email
+    if principal.display_name:
+        identifier = f"{principal.display_name} <{principal.email}>"
+    return f"HexShare - {identifier}"
+
+
+def _serialize_external_room_document_session(
+    delivery: ExternalRoomDocumentSessionDelivery,
+) -> ExternalRoomDocumentSessionResponse:
+    resolved = delivery.resolved
+    permissions = {
+        "read": True,
+        "download": resolved.can_download,
+        "print": resolved.can_print,
+    }
+    return ExternalRoomDocumentSessionResponse(
+        session_id=resolved.session_id,
+        tenant_id=resolved.principal.tenant_id,
+        room_id=resolved.principal.room_id,
+        document_id=resolved.document_id,
+        document_name=resolved.document_name,
+        mime_type=resolved.mime_type,
+        size=resolved.size,
+        permissions=permissions,
+        content_path=f"/api/v1/external-room/view-sessions/{resolved.session_id}/content",
+        download_path=(
+            f"/api/v1/external-room/view-sessions/{resolved.session_id}/download"
+            if resolved.can_download
+            else None
+        ),
+        watermark_text=external_room_document_watermark(resolved.principal),
+        inline_view_supported=delivery.view_policy.inline_view_supported,
+        view_kind=delivery.view_policy.view_kind,
+        view_reason=delivery.view_policy.reason,
+        page_count=delivery.pdf_preview.page_count if delivery.pdf_preview else None,
+        page_image_path_template=(
+            f"/api/v1/external-room/view-sessions/{resolved.session_id}/pages/{{page}}"
+            if delivery.pdf_preview
+            else None
+        ),
     )
 
 
@@ -230,10 +303,14 @@ def api_router() -> APIRouter:
         can_print: bool = Query(False),
         require_email: bool = Query(False),
         allowed_emails: Optional[list[str]] = Query(None),
+        recipient_email: Optional[str] = Query(None),
+        recipient_display_name: Optional[str] = Query(None),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
         link_service: LinkService = Depends(get_link_service),
     ) -> ShareLinkResponse:
+        if recipient_display_name and not recipient_email:
+            raise HTTPException(status_code=400, detail="recipient_email is required when recipient_display_name is set")
         try:
             await document_service.require_document_access(
                 principal=principal,
@@ -253,6 +330,8 @@ def api_router() -> APIRouter:
             can_print=can_print,
             require_email=require_email,
             allowed_emails=allowed_emails,
+            recipient_email=recipient_email,
+            recipient_display_name=recipient_display_name,
         )
         token = await link_service.generate_share_token(link)
         return _serialize_link(link, token)
@@ -477,6 +556,539 @@ def api_router() -> APIRouter:
         except ValueError:
             raise HTTPException(status_code=404, detail="Group not found")
         return None
+
+    @router.post(
+        "/document-groups/{group_id}/external-access",
+        response_model=ProvisionExternalRoomAccessResponse,
+    )
+    async def provision_external_room_access(
+        group_id: str,
+        recipient_email: str = Query(...),
+        recipient_display_name: Optional[str] = Query(None),
+        can_download: bool = Query(False),
+        can_print: bool = Query(False),
+        expires_in: Optional[int] = Query(None, ge=60),
+        invite_expires_in: int = Query(60 * 60 * 24 * 7, ge=300),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> ProvisionExternalRoomAccessResponse:
+        try:
+            await group_service.get_group(
+                principal=principal,
+                group_id=group_id,
+                required=ResourceAction.MANAGE,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        provisioned = await external_room_access_service.provision_room_access(
+            principal=principal,
+            room_id=group_id,
+            recipient_email=recipient_email,
+            recipient_display_name=recipient_display_name,
+            can_download=can_download,
+            can_print=can_print,
+            expires_in_seconds=expires_in,
+            invite_expires_in_seconds=invite_expires_in,
+        )
+        return ProvisionExternalRoomAccessResponse(
+            external_party_id=provisioned.party.id,
+            display_name=provisioned.party.display_name,
+            email=recipient_email.strip().lower(),
+            grant_id=provisioned.grant.id,
+            room_id=group_id,
+            invite_token=provisioned.invite_token,
+            invite_path=f"/external-room/invitations/{provisioned.invite_token}",
+            invite_expires_at=provisioned.invite_expires_at,
+            can_download=provisioned.grant.can_download,
+            can_print=provisioned.grant.can_print,
+        )
+
+    @router.get(
+        "/document-groups/{group_id}/external-access",
+        response_model=list[ExternalRoomGrantResponse],
+    )
+    async def list_external_room_access(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> list[ExternalRoomGrantResponse]:
+        try:
+            await group_service.get_group(
+                principal=principal,
+                group_id=group_id,
+                required=ResourceAction.MANAGE,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        items = await external_room_access_service.list_room_access(
+            tenant_id=principal.tenant_id,
+            room_id=group_id,
+        )
+        return [ExternalRoomGrantResponse(**item) for item in items]
+
+    @router.delete(
+        "/document-groups/{group_id}/external-access/{grant_id}",
+        status_code=204,
+        response_class=Response,
+        response_model=None,
+    )
+    async def revoke_external_room_access(
+        group_id: str,
+        grant_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> None:
+        try:
+            await group_service.get_group(
+                principal=principal,
+                group_id=group_id,
+                required=ResourceAction.MANAGE,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+        try:
+            await external_room_access_service.revoke_room_access(
+                tenant_id=principal.tenant_id,
+                grant_id=grant_id,
+                room_id=group_id,
+            )
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Grant not found")
+        return None
+
+    @router.get(
+        "/external-room/invitations/{token}",
+        response_model=ExternalRoomInviteInspectionResponse,
+    )
+    async def inspect_external_room_invitation(
+        token: str,
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> ExternalRoomInviteInspectionResponse:
+        try:
+            inspection = await external_room_access_service.inspect_invite(invite_token=token)
+        except ValueError as exc:
+            detail = str(exc)
+            if detail in {"grant_not_found", "party_not_found", "group_not_found"}:
+                raise HTTPException(status_code=404, detail=detail)
+            if detail in {"grant_revoked", "grant_expired"}:
+                raise HTTPException(status_code=410, detail=detail)
+            raise HTTPException(status_code=400, detail=detail)
+        group = inspection["group"]
+        grant = inspection["grant"]
+        party = inspection["party"]
+        return ExternalRoomInviteInspectionResponse(
+            room_id=group.id,
+            room_name=group.name,
+            email=inspection["email"],
+            display_name=party.display_name,
+            can_download=grant.can_download,
+            can_print=grant.can_print,
+            expires_at=inspection["expires_at"],
+        )
+
+    @router.post(
+        "/external-room/invitations/{token}/sessions",
+        response_model=ExternalRoomSessionResponse,
+    )
+    async def create_external_room_session(
+        token: str,
+        payload: CreateExternalRoomSessionRequest,
+        request: Request,
+        response: Response,
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> ExternalRoomSessionResponse:
+        try:
+            inspection = await external_room_access_service.inspect_invite(invite_token=token)
+            tokens = await external_room_access_service.create_session_from_invite(
+                invite_token=token,
+                email=payload.email,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except ValueError as exc:
+            detail = str(exc)
+            if detail == "email_required":
+                raise HTTPException(status_code=400, detail=detail)
+            if detail == "email_not_allowed":
+                raise HTTPException(status_code=403, detail=detail)
+            if detail in {"grant_revoked", "grant_expired", "party_inactive"}:
+                raise HTTPException(status_code=410, detail=detail)
+            if detail in {"grant_not_found", "party_not_found", "group_not_found"}:
+                raise HTTPException(status_code=404, detail=detail)
+            raise HTTPException(status_code=400, detail=detail)
+        secure = _secure_cookie(request)
+        response.set_cookie(
+            EXTERNAL_AUTH_COOKIE,
+            tokens.access_token,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+            max_age=tokens.expires_in,
+        )
+        response.set_cookie(
+            EXTERNAL_REFRESH_COOKIE,
+            tokens.refresh_token,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+            max_age=tokens.refresh_expires_in,
+        )
+        group = inspection["group"]
+        party = inspection["party"]
+        return ExternalRoomSessionResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            expires_in=tokens.expires_in,
+            refresh_expires_in=tokens.refresh_expires_in,
+            token_type=tokens.token_type,
+            room_id=group.id,
+            room_name=group.name,
+            display_name=party.display_name,
+            email=payload.email.strip().lower(),
+        )
+
+    @router.post(
+        "/external-room/refresh",
+        response_model=ExternalRoomSessionResponse,
+    )
+    async def refresh_external_room_session(
+        request: Request,
+        response: Response,
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> ExternalRoomSessionResponse:
+        refresh_token = request.cookies.get(EXTERNAL_REFRESH_COOKIE)
+        if not refresh_token:
+            raise HTTPException(status_code=401, detail="Missing external refresh token")
+        try:
+            tokens = await external_room_access_service.refresh_session(refresh_token=refresh_token)
+            principal = await external_room_access_service.authenticate_access_token(
+                access_token=tokens.access_token
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc))
+        secure = _secure_cookie(request)
+        response.set_cookie(
+            EXTERNAL_AUTH_COOKIE,
+            tokens.access_token,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+            max_age=tokens.expires_in,
+        )
+        response.set_cookie(
+            EXTERNAL_REFRESH_COOKIE,
+            tokens.refresh_token,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+            max_age=tokens.refresh_expires_in,
+        )
+        group = await external_room_access_service.get_room_group(
+            tenant_id=principal.tenant_id,
+            room_id=principal.room_id,
+        )
+        return ExternalRoomSessionResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            expires_in=tokens.expires_in,
+            refresh_expires_in=tokens.refresh_expires_in,
+            token_type=tokens.token_type,
+            room_id=principal.room_id,
+            room_name=group.name if group else principal.room_id,
+            display_name=principal.display_name,
+            email=principal.email,
+        )
+
+    @router.post(
+        "/external-room/logout",
+        status_code=204,
+        response_class=Response,
+        response_model=None,
+    )
+    async def logout_external_room_session(
+        response: Response,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> None:
+        await external_room_access_service.close_session(principal=principal)
+        response.delete_cookie(EXTERNAL_AUTH_COOKIE, path="/")
+        response.delete_cookie(EXTERNAL_REFRESH_COOKIE, path="/")
+        return None
+
+    @router.get(
+        "/external-room/current",
+        response_model=ExternalRoomContextResponse,
+    )
+    async def get_external_room_context(
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> ExternalRoomContextResponse:
+        try:
+            group = await group_service.get_group(
+                principal=principal.as_tenant_principal(),
+                group_id=principal.room_id,
+                required=ResourceAction.READ,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return ExternalRoomContextResponse(
+            room_id=group.id,
+            room_name=group.name,
+            display_name=principal.display_name,
+            email=principal.email,
+            can_download=principal.can_download,
+            can_print=principal.can_print,
+        )
+
+    @router.get("/external-room/current/documents", response_model=list[Document])
+    async def list_external_room_documents(
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> list[Document]:
+        try:
+            docs = await group_service.list_group_documents(
+                principal=principal.as_tenant_principal(),
+                group_id=principal.room_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        await external_room_access_service.record_document_list(principal=principal)
+        return list(docs)
+
+    @router.get(
+        "/external-room/current/documents/{document_id}/download",
+        response_model=DownloadUrlResponse,
+    )
+    async def get_external_room_document_download(
+        document_id: str,
+        expires_in: int = Query(default=900, ge=60, le=3600),
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        document_service: DocumentService = Depends(get_document_service),
+        upload_service: UploadService = Depends(get_upload_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> DownloadUrlResponse:
+        try:
+            document = await document_service.require_document_access(
+                principal=principal.as_tenant_principal(),
+                document_id=document_id,
+                required=ResourceAction.EXPORT,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
+        await external_room_access_service.record_document_download(
+            principal=principal,
+            document_id=document_id,
+        )
+        download_url = await upload_service.get_download_url(
+            tenant_id=principal.tenant_id,
+            document_id=document_id,
+            expires_in=expires_in,
+            filename=document.name,
+        )
+        return DownloadUrlResponse(
+            document_id=document_id,
+            download_url=download_url,
+            expires_in=expires_in,
+        )
+
+    @router.post(
+        "/external-room/current/documents/{document_id}/sessions",
+        response_model=ExternalRoomDocumentSessionResponse,
+    )
+    async def create_external_room_document_session(
+        document_id: str,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> ExternalRoomDocumentSessionResponse:
+        try:
+            delivery = await external_room_viewer_service.create_view_session(
+                principal=principal,
+                document_id=document_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return _serialize_external_room_document_session(delivery)
+
+    @router.get(
+        "/external-room/view-sessions/{session_id}",
+        response_model=ExternalRoomDocumentSessionResponse,
+    )
+    async def get_external_room_document_session(
+        session_id: str,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> ExternalRoomDocumentSessionResponse:
+        try:
+            delivery = await external_room_viewer_service.describe_view_session(
+                principal=principal,
+                session_id=session_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 404 if detail == "session_not_found" else 404
+            raise HTTPException(status_code=status_code, detail=detail)
+        return _serialize_external_room_document_session(delivery)
+
+    @router.get("/external-room/view-sessions/{session_id}/content")
+    async def stream_external_room_view_content(
+        session_id: str,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> StreamingResponse:
+        try:
+            streamed = await external_room_viewer_service.stream_document(
+                principal=principal,
+                session_id=session_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except DocumentProcessingError as exc:
+            detail = str(exc)
+            if detail == "inline_view_not_supported":
+                status_code = 415
+            elif detail == "page_image_view_required":
+                status_code = 409
+            else:
+                status_code = 422
+            raise HTTPException(status_code=status_code, detail=detail)
+
+        response = StreamingResponse(
+            _stream_bytes(streamed.content),
+            media_type=streamed.media_type,
+        )
+        return _apply_viewer_headers(
+            response,
+            filename=streamed.filename,
+            disposition="inline",
+        )
+
+    @router.get("/external-room/view-sessions/{session_id}/pages/{page_number}")
+    async def stream_external_room_view_page_image(
+        session_id: str,
+        page_number: int,
+        width: int = Query(1400, ge=400, le=2200),
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> StreamingResponse:
+        try:
+            rendered = await external_room_viewer_service.render_document_page(
+                principal=principal,
+                session_id=session_id,
+                page_number=page_number,
+                render_width=width,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except DocumentProcessingError as exc:
+            detail = str(exc)
+            if detail == "page_out_of_range":
+                status_code = 404
+            elif detail == "invalid_page_number":
+                status_code = 400
+            elif detail == "page_image_view_not_supported":
+                status_code = 415
+            elif detail == "inline_view_backend_unavailable":
+                status_code = 503
+            else:
+                status_code = 422
+            raise HTTPException(status_code=status_code, detail=detail)
+
+        response = StreamingResponse(
+            _stream_bytes(rendered.content),
+            media_type=rendered.media_type,
+        )
+        return _apply_viewer_headers(
+            response,
+            filename=_build_page_image_filename(f"{session_id}.pdf", page_number),
+            disposition="inline",
+        )
+
+    @router.get("/external-room/view-sessions/{session_id}/download")
+    async def download_external_room_view_content(
+        session_id: str,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> StreamingResponse:
+        try:
+            streamed = await external_room_viewer_service.download_document(
+                principal=principal,
+                session_id=session_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            detail = str(exc)
+            if detail == "download_not_allowed":
+                raise HTTPException(status_code=403, detail="Downloads are disabled for this room grant")
+            raise HTTPException(status_code=404, detail=detail)
+
+        response = StreamingResponse(
+            _stream_bytes(streamed.content),
+            media_type=streamed.media_type,
+        )
+        return _apply_viewer_headers(
+            response,
+            filename=streamed.filename,
+            disposition="attachment",
+        )
+
+    @router.post("/external-room/view-sessions/{session_id}/close")
+    async def close_external_room_view_session(
+        session_id: str,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> dict:
+        try:
+            await external_room_viewer_service.close_view_session(
+                principal=principal,
+                session_id=session_id,
+            )
+        except (AccessDenied, ValueError):
+            pass
+        return {"status": "closed"}
+
+    @router.post("/external-room/view-sessions/{session_id}/page-view")
+    async def record_external_room_page_view(
+        session_id: str,
+        page_number: int = Query(..., ge=1, description="Page number being viewed"),
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
+    ) -> dict:
+        try:
+            await external_room_viewer_service.record_page_view(
+                principal=principal,
+                session_id=session_id,
+                page_number=page_number,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return {"status": "ok"}
 
     @router.get("/workspace/users")
     async def list_workspace_users(

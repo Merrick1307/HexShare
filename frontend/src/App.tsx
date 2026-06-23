@@ -10,6 +10,8 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { Dashboard } from './pages/Dashboard';
 import { DocumentDetails } from './pages/DocumentDetails';
+import { ExternalRoomInvitation } from './pages/ExternalRoomInvitation';
+import { ExternalRoomViewer } from './pages/ExternalRoomViewer';
 import { Groups } from './pages/Groups';
 import { GroupDetails } from './pages/GroupDetails';
 import { ViewDocument } from './pages/ViewDocument';
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/view/:token" element={<ViewDocument />} />
+        <Route path="/external-room/invitations/:token" element={<ExternalRoomInvitation />} />
+        <Route path="/external-room/viewer/:sessionId" element={<ExternalRoomViewer />} />
         
         {/* Authenticated Routes */}
         <Route element={<Layout />}>
@@ -40,5 +44,3 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-
-

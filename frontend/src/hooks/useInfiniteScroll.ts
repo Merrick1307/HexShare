@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { PaginatedResponse } from '../types';
 
 interface UseInfiniteScrollOptions<T> {
   fetchFn: (offset: number, limit: number) => Promise<PaginatedResponse<T>>;
   pageSize?: number;
   enabled?: boolean;
-  rootRef?: React.RefObject<HTMLElement | null>;
+  rootRef?: RefObject<HTMLElement | null>;
 }
 
 export function useInfiniteScroll<T>({ fetchFn, pageSize = 20, enabled = true, rootRef }: UseInfiniteScrollOptions<T>) {

@@ -25,6 +25,14 @@ def get_viewer_service(request: Request):
     return request.app.state.viewer_service
 
 
+def get_external_room_access_service(request: Request):
+    return request.app.state.external_room_access_service
+
+
+def get_external_room_viewer_service(request: Request):
+    return request.app.state.external_room_viewer_service
+
+
 def get_object_storage(request: Request):
     return request.app.state.object_storage
 
@@ -39,6 +47,10 @@ def get_tenant_auth(request: Request):
 
 def get_share_auth(request: Request):
     return request.app.state.share_auth
+
+
+def get_external_room_auth(request: Request):
+    return request.app.state.external_room_auth
 
 
 def get_oidc_client_service(request: Request):

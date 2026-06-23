@@ -29,6 +29,8 @@ export interface ShareLink {
   can_print: boolean;
   require_email: boolean;
   allowed_emails: string[];
+  access_mode?: string;
+  bound_email_normalized?: string | null;
   revoked_at: string | null;
   created_at: string;
   created_by: string;
@@ -94,4 +96,86 @@ export interface DocumentGroup {
   description: string | null;
   created_by: string;
   created_at: string;
+}
+
+export interface ExternalRoomGrant {
+  grant_id: string;
+  external_party_id: string;
+  display_name: string | null;
+  email: string;
+  room_id: string;
+  can_download: boolean;
+  can_print: boolean;
+  revoked_at: string | null;
+  expires_at: string | null;
+  granted_at: string;
+}
+
+export interface ProvisionExternalRoomAccessResponse {
+  external_party_id: string;
+  display_name: string | null;
+  email: string;
+  grant_id: string;
+  room_id: string;
+  invite_token: string;
+  invite_path: string;
+  invite_expires_at: string;
+  can_download: boolean;
+  can_print: boolean;
+}
+
+export interface ExternalRoomInviteInspection {
+  room_id: string;
+  room_name: string;
+  email: string;
+  display_name: string | null;
+  can_download: boolean;
+  can_print: boolean;
+  expires_at: string;
+}
+
+export interface ExternalRoomSession {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  refresh_expires_in: number;
+  token_type: string;
+  room_id: string;
+  room_name: string;
+  display_name: string | null;
+  email: string;
+}
+
+export interface ExternalRoomContext {
+  room_id: string;
+  room_name: string;
+  display_name: string | null;
+  email: string;
+  can_download: boolean;
+  can_print: boolean;
+}
+
+export interface ExternalRoomDocumentSession {
+  session_id: string;
+  tenant_id: string;
+  room_id: string;
+  document_id: string;
+  document_name: string;
+  mime_type: string;
+  size: number;
+  permissions: Record<string, boolean>;
+  content_path: string;
+  download_path?: string | null;
+  watermark_text?: string | null;
+  inline_view_supported: boolean;
+  view_kind: string;
+  view_reason?: string | null;
+  page_count?: number | null;
+  page_image_path_template?: string | null;
+}
+
+export interface DownloadUrlResponse {
+  document_id: string;
+  download_url: string;
+  expires_in: number;
 }

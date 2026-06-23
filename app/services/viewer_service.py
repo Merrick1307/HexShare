@@ -172,16 +172,53 @@ class ViewerService:
         normalized_email = email.strip().lower() if email else None
         if link.require_email and not normalized_email:
             raise ValueError("email_required")
+        external_party_id: str | None = None
+        external_access_grant_id: str | None = link.external_access_grant_id
+        identity_source: str | None = "manual_entry" if normalized_email else None
         if link.allowed_emails:
             allowed = {item.strip().lower() for item in link.allowed_emails}
             if normalized_email not in allowed:
                 raise ValueError("email_not_allowed")
+        if link.bound_email_normalized:
+            if normalized_email != link.bound_email_normalized:
+                raise ValueError("email_not_allowed")
+            identity_source = "bound_party_email"
+        if link.external_access_grant_id:
+            grant = await self._storage.get_external_access_grant(
+                tenant_id=tenant_id,
+                grant_id=link.external_access_grant_id,
+            )
+            if grant is None or grant.revoked_at is not None:
+                raise ValueError("revoked")
+            if grant.expires_at is not None and grant.expires_at <= self._now():
+                raise ValueError("expired")
+            external_access_grant_id = grant.id
+            external_party_id = grant.external_party_id
+            party = await self._storage.get_external_party(
+                tenant_id=tenant_id,
+                external_party_id=grant.external_party_id,
+            )
+            if party is None:
+                raise ValueError("not_found")
+            if party.status.value in {"blocked", "revoked", "archived"}:
+                raise ValueError("revoked")
+            if normalized_email:
+                await self._storage.mark_external_party_email_seen(
+                    tenant_id=tenant_id,
+                    email_normalized=normalized_email,
+                    seen_at=self._now(),
+                    verified_at=self._now(),
+                )
 
         session = VisitorSession(
             id=self._storage.generate_id("vs"),
             tenant_id=tenant_id,
             share_link_id=link.id,
             visitor_id=normalized_email,
+            external_party_id=external_party_id,
+            external_access_grant_id=external_access_grant_id,
+            presented_email=normalized_email,
+            identity_source=identity_source,
             ip_hash=self._hash(ip_address),
             ua_hash=self._hash(user_agent),
             started_at=self._now(),

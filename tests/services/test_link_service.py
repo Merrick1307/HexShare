@@ -102,6 +102,9 @@ async def test_create_share_link_defaults():
     assert link.can_print is False
     assert link.require_email is False
     assert link.allowed_emails == []
+    assert link.access_mode.value == "anonymous"
+    assert link.bound_email_normalized is None
+    assert link.external_access_grant_id is None
 
 
 @pytest.mark.asyncio
@@ -145,6 +148,72 @@ async def test_revoke_share_link_sets_revoked_at_and_revokes_jti():
     assert updated.revoked_at is not None
     assert len(token_port._revoked) == 1
     assert token_port._revoked[0][0] == link.jti
+
+
+@pytest.mark.asyncio
+async def test_create_recipient_share_link_creates_external_party_and_grant():
+    service, storage, _ = _make_service()
+
+    link = await service.create_share_link(
+        tenant_id="tenant-1",
+        document_id="doc-1",
+        created_by="user-1",
+        expires_in_seconds=3600,
+        can_download=True,
+        recipient_email="James.Okafor@example.com",
+        recipient_display_name="James Okafor",
+    )
+
+    assert link.require_email is True
+    assert link.allowed_emails == ["james.okafor@example.com"]
+    assert link.access_mode.value == "identified"
+    assert link.bound_email_normalized == "james.okafor@example.com"
+    assert link.external_access_grant_id is not None
+
+    party = await storage.get_external_party_by_email(
+        tenant_id="tenant-1",
+        email_normalized="james.okafor@example.com",
+    )
+    assert party is not None
+    assert party.display_name == "James Okafor"
+
+    grant = await storage.get_external_access_grant(
+        tenant_id="tenant-1",
+        grant_id=link.external_access_grant_id,
+    )
+    assert grant is not None
+    assert grant.external_party_id == party.id
+    assert grant.resource_type.value == "document"
+    assert grant.grant_type.value == "link"
+    assert grant.can_download is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_identified_share_link_revokes_external_access_grant():
+    service, storage, _ = _make_service()
+
+    link = await service.create_share_link(
+        tenant_id="tenant-1",
+        document_id="doc-1",
+        created_by="user-1",
+        expires_in_seconds=3600,
+        recipient_email="viewer@example.com",
+        recipient_display_name="Viewer",
+    )
+    assert link.external_access_grant_id is not None
+
+    await service.revoke_share_link(
+        tenant_id="tenant-1",
+        link_id=link.id,
+        revoked_by="user-1",
+    )
+
+    grant = await storage.get_external_access_grant(
+        tenant_id="tenant-1",
+        grant_id=link.external_access_grant_id,
+    )
+    assert grant is not None
+    assert grant.revoked_at is not None
 
 
 @pytest.mark.asyncio

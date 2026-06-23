@@ -28,6 +28,8 @@ HEXSHARE_JWT_SECRET=replace-me
 HEXSHARE_SESSION_SECRET=replace-me
 ```
 
+`HEXSHARE_JWT_SECRET` also signs external-room invite and session tokens, so it must be set (and kept stable) for identified share links and external data rooms to work. Optional external-room token lifetimes can be tuned with `HEXSHARE_EXTERNAL_ROOM_ACCESS_TTL_SECONDS`, `HEXSHARE_EXTERNAL_ROOM_REFRESH_TTL_SECONDS`, and `HEXSHARE_EXTERNAL_ROOM_INVITE_TTL_SECONDS`.
+
 If you are using the bundled HexIAM flow, also keep these in mind:
 
 ```env

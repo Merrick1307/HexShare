@@ -14,6 +14,7 @@
    - [Token Refresh Flow](#token-refresh-flow)
    - [Document Upload Flow](#document-upload-flow)
    - [Share Link Creation & Visitor View](#share-link-creation--visitor-view)
+   - [External Room Provisioning & Access](#external-room-provisioning--access)
    - [PDF Page Streaming](#pdf-page-streaming)
    - [Background Pre-render Flow](#background-pre-render-flow)
 7. [Authorization Flow](#7-authorization-flow)
@@ -32,7 +33,7 @@
 
 HexShare is a self-hostable secure document sharing platform that sits between lightweight link sharing and a full virtual data room. It is API-first, built on FastAPI and React, uses S3-compatible object storage for document bytes, and can run either against HexIAM-issued tokens or locally-issued HexShare session tokens derived from upstream OIDC login.
 
-The current implementation supports the core secure-delivery loop end to end: OIDC login, local session minting, presigned uploads, share-link issuance, server-mediated viewing, page-level PDF rendering with watermarking, event logging, background prerendering, and a compose-driven self-hosting path that can bundle HexIAM alongside the app.
+The current implementation supports the core secure-delivery loop end to end: OIDC login, local session minting, presigned uploads, share-link issuance, server-mediated viewing, page-level PDF rendering with watermarking, event logging, background prerendering, and a compose-driven self-hosting path that can bundle HexIAM alongside the app. On top of anonymous links, it adds a first-class external-recipient identity layer — named external parties, revocable access grants, identified share links, and group-scoped external data rooms with their own invite-to-session token flow and per-recipient audit trail.
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -48,8 +49,11 @@ The current implementation supports the core secure-delivery loop end to end: OI
 | Share-token JTI revocation store | ✅ | In-memory by default; Redis-backed adapter available for multi-instance deployments |
 | Bundled HexIAM self-host overlay | ✅ | `docker-compose.with-hexiam.yaml` + bootstrap script prepare a combined stack |
 | Upload metadata columns | ✅ | `upload_status`, `object_etag`, `checksum_sha256`, `uploaded_at` |
+| External-party identity model | ✅ | Named recipients keyed by normalized email, with active/revoked/archived/blocked status |
+| Identified share links | ✅ | A link bound to a single recipient email; auto-provisions the party + access grant |
+| External data rooms | ✅ | Provision/list/revoke named-recipient access over a document group; invite → session JWT flow |
+| External room viewer + audit | ✅ | Watermarked session-bound page streaming with per-interaction room events folded into analytics |
 | DOCX inline viewing | 🔜 | Currently download-only |
-| External-party identity model | 🔜 | Email capture exists; richer external identity workflows are still open |
 | AI Q&A per document corpus | 🔜 | |
 | Redlines / tracked changes | 🔜 | |
 
@@ -138,6 +142,7 @@ flowchart LR
     subgraph Dependencies["Auth Dependencies"]
         tenant_auth["TenantAuthDependency\nJWT → TenantPrincipal"]
         share_auth["ShareTokenDependency\nShare JWT → Claims"]
+        external_auth["ExternalRoomAuth\nExternal JWT → ExternalRoomPrincipal"]
         access_control["HybridAccessControl\nedge + PDP fallback"]
     end
 
@@ -146,6 +151,8 @@ flowchart LR
         group_svc["DocumentGroupService"]
         link_svc["LinkService"]
         viewer_svc["ViewerService"]
+        ext_access_svc["ExternalRoomAccessService\nprovision · invite · session JWTs"]
+        ext_viewer_svc["ExternalRoomViewerService\nroom-scoped delivery"]
         upload_svc["UploadService"]
         analytics_svc["AnalyticsService"]
         oidc_svc["OIDCFlowService"]
@@ -170,14 +177,18 @@ flowchart LR
     upload_svc --> storage_port
     upload_svc --> object_port
 
-    main_api --> tenant_auth & share_auth & access_control
+    main_api --> tenant_auth & share_auth & external_auth & access_control
     main_api --> doc_svc & group_svc & link_svc & viewer_svc & analytics_svc
+    main_api --> ext_access_svc & ext_viewer_svc
 
     doc_svc --> storage_port
     group_svc --> storage_port & iam_port
     link_svc --> storage_port & token_port
     analytics_svc --> storage_port
     viewer_svc --> storage_port & object_port & cache_port & queue_port & processor
+    ext_access_svc --> storage_port & token_port
+    ext_viewer_svc --> storage_port & object_port & cache_port & processor
+    external_auth --> ext_access_svc
 
     tenant_auth --> authn_port
 ```
@@ -405,6 +416,50 @@ sequenceDiagram
         API->>PG: INSERT PAGE_VIEW event
         API->>Redis: ENQUEUE prerender job for page n+1
     end
+```
+
+---
+
+### External Room Provisioning & Access
+
+```mermaid
+sequenceDiagram
+    actor Owner
+    actor Recipient
+    participant API as HexShare API
+    participant Access as ExternalRoomAccessService
+    participant PG as PostgreSQL
+
+    Owner->>API: POST /external-room/rooms/{room_id}/access<br/>{email, display_name, can_download, can_print, expires_in}
+    API->>Access: provision_room_access(...)
+    Access->>PG: upsert external_party + external_party_email
+    Access->>PG: upsert external_access_grant (resource_type=room)
+    Access->>Access: encode invite JWT (token_use=external_room_invite)
+    Access-->>Owner: {invite_token, invite_expires_at} → share invite link
+
+    Recipient->>API: GET /external-room/invitations/{token}
+    API->>Access: inspect_invite(invite_token)
+    Access->>PG: load grant + party + group, validate not revoked/expired
+    Access-->>Recipient: {room name, email, expiry}
+
+    Recipient->>API: POST /external-room/sessions {invite_token, email}
+    API->>Access: create_session_from_invite(...)
+    Access->>Access: verify presented email == bound email
+    Access->>PG: INSERT external_room_session + ROOM_OPEN event
+    Access->>Access: issue access + refresh JWTs (re-validated per request)
+    API->>Recipient: Set-Cookie external access token + {tokens}
+
+    loop Browse room
+        Recipient->>API: GET /external-room/current/documents (Bearer/cookie)
+        API->>Access: authenticate_access_token → ExternalRoomPrincipal
+        API->>PG: re-validate grant + party status, list room documents
+        API->>PG: record DOCUMENT_LIST / DOCUMENT_VIEW_OPEN / PAGE_VIEW events
+        API-->>Recipient: watermarked, session-bound page streaming
+    end
+
+    Owner->>API: DELETE /external-room/rooms/{room_id}/access/{grant_id}
+    API->>Access: revoke_room_access(...) → grant.revoked_at set
+    Note over Access,PG: Next request from the recipient fails grant re-validation → 401
 ```
 
 ---
@@ -735,6 +790,13 @@ erDiagram
     VISITOR_SESSIONS ||--o{ VIEW_EVENTS : "produces"
     DOCUMENTS ||--o{ VIEW_EVENTS : "tracked by"
 
+    EXTERNAL_PARTIES ||--o{ EXTERNAL_PARTY_EMAILS : "identified by"
+    EXTERNAL_PARTIES ||--o{ EXTERNAL_ACCESS_GRANTS : "granted"
+    EXTERNAL_ACCESS_GRANTS ||--o{ EXTERNAL_ROOM_SESSIONS : "opens"
+    EXTERNAL_ROOM_SESSIONS ||--o{ EXTERNAL_ROOM_EVENTS : "produces"
+    DOCUMENT_GROUPS ||--o{ EXTERNAL_ACCESS_GRANTS : "room scope (resource_type=room)"
+    EXTERNAL_ACCESS_GRANTS ||--o| SHARE_LINKS : "backs identified link"
+
     DOCUMENTS {
         string id PK
         string tenant_id
@@ -779,6 +841,9 @@ erDiagram
         bool can_print
         bool require_email
         string allowed_emails
+        string external_access_grant_id FK "set for identified links"
+        string access_mode "anonymous|identified"
+        string bound_email_normalized "set for identified links"
         datetime revoked_at "NULL = active"
         datetime created_at
         string created_by
@@ -789,6 +854,10 @@ erDiagram
         string tenant_id
         string share_link_id FK
         string visitor_id "email if provided"
+        string external_party_id FK "set for identified links"
+        string external_access_grant_id FK
+        string presented_email
+        string identity_source "link_email|manual_entry|bound_party_email"
         string ip_hash
         string ua_hash
         datetime started_at
@@ -806,9 +875,77 @@ erDiagram
         int duration_ms
         datetime timestamp
     }
+
+    EXTERNAL_PARTIES {
+        string id PK "ep_<uuid>"
+        string tenant_id
+        string display_name
+        string status "active|revoked|archived|blocked"
+        string created_by
+        datetime created_at
+        datetime updated_at
+        datetime archived_at
+    }
+
+    EXTERNAL_PARTY_EMAILS {
+        string id PK "epe_<uuid>"
+        string tenant_id
+        string external_party_id FK
+        string email_normalized "unique identity key per tenant"
+        string email_original
+        bool is_primary
+        datetime verified_at
+        datetime last_seen_at
+        datetime created_at
+    }
+
+    EXTERNAL_ACCESS_GRANTS {
+        string id PK "eag_<uuid>"
+        string tenant_id
+        string external_party_id FK
+        string resource_type "document|room"
+        string resource_id "document_id or document_group_id"
+        string grant_type "link|provisioned"
+        int permissions "ResourceAction bitmask"
+        bool can_download
+        bool can_print
+        datetime expires_at "NULL = no expiry"
+        datetime revoked_at "NULL = active"
+        string granted_by
+        datetime granted_at
+        datetime updated_at
+    }
+
+    EXTERNAL_ROOM_SESSIONS {
+        string id PK "ers_<uuid>"
+        string tenant_id
+        string external_party_id FK
+        string external_access_grant_id FK
+        string room_id "document_group_id"
+        int permissions
+        string presented_email
+        datetime started_at
+        datetime ended_at "NULL = still active"
+        string ip_hash
+        string ua_hash
+    }
+
+    EXTERNAL_ROOM_EVENTS {
+        string id PK "ere_<uuid>"
+        string tenant_id
+        string external_room_session_id FK
+        string room_id
+        string event_type "room_open|document_list|document_view_open|document_page_view|document_view_close|document_download|room_close"
+        string document_id "nullable"
+        int page_number "nullable — required for document_page_view"
+        int duration_ms
+        datetime timestamp
+    }
 ```
 
 > **Authorization split:** `room_id IS NULL` → gated by `document_permissions` bitmask lookup. `room_id` set → gated by the JWT `policy_map[room_id]` bitmask — no extra DB lookup for grouped documents.
+>
+> **External access:** External recipients are not workspace users. An `EXTERNAL_ACCESS_GRANT` (scoped to a document or a room) is the unit of access; an external-room access JWT carries the grant's permission bitmask, and every request re-validates the grant and party status against the database before serving content.
 
 ---
 
@@ -861,8 +998,10 @@ HexShare/
 |   |-- main.py                   # FastAPI app factory + lifespan wiring (composition root)
 |   |
 |   |-- domain/                   # Domain models - pure Pydantic, no logic, no ORM
-|   |   `-- models.py             # Document, ShareLink, VisitorSession,
-|   |                             #   ViewEvent, DocumentGroup, DocumentPermission
+|   |   `-- models.py             # Document, ShareLink, VisitorSession, ViewEvent,
+|   |                             #   DocumentGroup, DocumentPermission, ExternalParty,
+|   |                             #   ExternalPartyEmail, ExternalAccessGrant,
+|   |                             #   ExternalRoomSession, ExternalRoomEvent
 |   |
 |   |-- ports/                    # Abstract interfaces - the hexagonal "contracts"
 |   |   |-- storage_port.py       # StoragePort - CRUD for all entities
@@ -880,10 +1019,12 @@ HexShare/
 |   |-- services/                 # Business logic - import ports only, never adapters
 |   |   |-- document_service.py   # Document lifecycle + instance ACL enforcement
 |   |   |-- document_group_service.py  # Group CRUD + IAM dual-write coordination
-|   |   |-- link_service.py       # Share link create/revoke + JWT generation
+|   |   |-- link_service.py       # Share link create/revoke + JWT generation (incl. identified links)
 |   |   |-- viewer_service.py     # View session management + page rendering
+|   |   |-- external_room_access_service.py  # Provision/invite/session JWTs + room events
+|   |   |-- external_room_viewer_service.py  # Room-scoped protected document delivery
 |   |   |-- upload_service.py     # Presigned upload orchestration
-|   |   |-- analytics_service.py  # View event aggregation
+|   |   |-- analytics_service.py  # View event aggregation (incl. external-room events)
 |   |   |-- oidc_service.py       # PKCE flow state management
 |   |   |-- local_session_service.py # Local access/refresh token issuance from OIDC user info
 |   |   `-- document_processor.py # Format classify, PDF render, watermark, HTML wrap
@@ -921,7 +1062,8 @@ HexShare/
 |   |
 |   |-- auth/                     # FastAPI dependencies that sit between HTTP and services
 |   |   |-- tenant_auth.py        # TenantPrincipal extraction (Bearer + cookie fallback)
-|   |   `-- share_token_auth.py   # Share JWT -> ShareTokenClaims
+|   |   |-- share_token_auth.py   # Share JWT -> ShareTokenClaims
+|   |   `-- external_room_auth.py # External room JWT/cookie -> ExternalRoomPrincipal
 |   |
 |   |-- core/
 |   |   |-- authz.py              # ResourceAction IntFlag bitmask enum + helpers
@@ -930,6 +1072,7 @@ HexShare/
 |   |-- schemas/                  # Pydantic request/response schemas (API contract)
 |   |   |-- pagination.py
 |   |   |-- share.py
+|   |   |-- external_room.py       # External-room request/response schemas
 |   |   |-- upload.py
 |   |   `-- viewer.py
 |   |
@@ -942,7 +1085,8 @@ HexShare/
 |
 |-- frontend/                     # React + TypeScript SPA
 |   `-- src/
-|       |-- pages/                # Dashboard, DocumentDetails, Groups, Login, Signup, Landing
+|       |-- pages/                # Dashboard, DocumentDetails, Groups, Login, Signup, Landing,
+|       |                         #   ExternalRoomInvitation, ExternalRoomViewer
 |       |-- components/           # Layout, Badge, Button, Card, Modal, HexLogo
 |       |-- hooks/                # useInfiniteScroll and related UI hooks
 |       |-- services/api.ts       # Typed API client + auto-refresh interceptor on 401
@@ -954,7 +1098,11 @@ HexShare/
 |   |-- 0002_add_hexshare_indexes.py
 |   |-- 0003_add_document_upload_metadata.py
 |   |-- 0004_add_document_groups_and_permissions.py
-|   `-- 0005_add_local_auth_and_group_memberships.py
+|   |-- 0005_add_local_auth_and_group_memberships.py
+|   |-- 0006_add_external_party_identity.py
+|   |-- 0007_add_external_room_sessions.py
+|   |-- 0008_expand_external_room_event_types.py
+|   `-- 0009_add_external_room_page_view_fields.py
 |
 |-- tests/
 |   |-- unit/                     # Pure unit tests - all ports stubbed, no infra
@@ -1152,6 +1300,11 @@ The overlay is meant to be paired with `scripts/prepare_hexiam.py`, which clones
 | `HEXSHARE_IAM_POLICY` | `hexiam`, `local` | IAM policy coordination adapter |
 | `HEXSHARE_RENDERED_PAGE_CACHE` | `inmemory`, `redis` | Rendered-page cache backend |
 | `HEXSHARE_SHARE_TOKEN_REVOCATION_STORE` | `memory`, `redis` | Share-link JTI revocation backend |
+| `HEXSHARE_JWT_SECRET` | string | Signs external-room invite/session tokens (required for external rooms) |
+| `HEXSHARE_AUTH_AUDIENCE` | string | Audience claim for external-room tokens (default `hexshare-external`) |
+| `HEXSHARE_EXTERNAL_ROOM_ACCESS_TTL_SECONDS` | integer | External-room access-token lifetime (default `3600`) |
+| `HEXSHARE_EXTERNAL_ROOM_REFRESH_TTL_SECONDS` | integer | External-room refresh-token lifetime (default 7 days) |
+| `HEXSHARE_EXTERNAL_ROOM_INVITE_TTL_SECONDS` | integer | Invite-token lifetime (default 7 days) |
 | `HEXSHARE_TASK_QUEUE` | `noop`, `arq` | Background queue backend |
 | `HEXSHARE_VIEWER_STRATEGY` | `secure_streaming` | Document delivery mode |
 | `HEXSHARE_DOCUMENT_PROCESSING_ENABLED` | `true`, `false` | Enable/disable document processor |

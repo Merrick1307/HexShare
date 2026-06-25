@@ -211,6 +211,21 @@ export const api = {
     return tryRefreshToken();
   },
 
+  async authConfig(): Promise<{ demo_mode: boolean; default_idp: string }> {
+    return fetchPublic<{ demo_mode: boolean; default_idp: string }>(`${AUTH_PREFIX}/auth/config`);
+  },
+
+  async demoLogin(): Promise<void> {
+    const response = await fetch(`${AUTH_PREFIX}/auth/demo-login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error('Demo login is not available on this deployment.');
+    }
+  },
+
   toAbsoluteApiUrl,
   toAbsoluteFrontendUrl,
 

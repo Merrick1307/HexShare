@@ -50,6 +50,132 @@ async def login(
     resp.set_cookie(OIDC_TMP_COOKIE, start.tmp_state_token, httponly=True, samesite="lax", path="/", max_age=600)
     return resp
 
+@router.get("/auth/config")
+async def auth_config(request: Request):
+    """Public, unauthenticated capability flags for the login UI.
+
+    Lets the frontend decide whether to offer the credential-free demo
+    login without baking the decision into the build.
+    """
+    return JSONResponse(
+        {
+            "demo_mode": bool(getattr(request.app.state, "demo_mode", False)),
+            "default_idp": getattr(request.app.state, "default_oidc_idp", "hexiam"),
+        }
+    )
+
+
+# Fixed identity for the shared public demo workspace. Everyone who clicks
+# "Try the demo" lands as this same user in the same tenant.
+_DEMO_USER_INFO = {
+    "sub": "demo-user",
+    "email": "demo@hexshare.local",
+    "name": "Demo User",
+}
+
+
+@router.post("/auth/demo-login")
+async def demo_login(request: Request):
+    """Credential-free login for demo deployments only.
+
+    Hard-gated behind ``HEXSHARE_DEMO_MODE``. When the flag is off the route
+    returns 404 so it is indistinguishable from not existing. Mints the same
+    local session cookies as the OIDC callback's local path, with no upstream
+    identity provider involved.
+    """
+    if not getattr(request.app.state, "demo_mode", False):
+        raise HTTPException(404, "Not Found")
+    local_session_service = getattr(request.app.state, "local_session_service", None)
+    if local_session_service is None:
+        raise HTTPException(500, "Demo login requires HEXSHARE_AUTHENTICATOR=local")
+
+    try:
+        tokens = await local_session_service.issue_session_from_user_info(
+            idp="demo",
+            user_info=dict(_DEMO_USER_INFO),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(500, f"Demo login failed: {exc}")
+
+    resp = JSONResponse({"status": "ok"})
+    secure = _secure_cookie(request)
+    resp.set_cookie(
+        AUTH_COOKIE,
+        tokens.access_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+        max_age=tokens.expires_in,
+    )
+    resp.set_cookie(
+        REFRESH_COOKIE,
+        tokens.refresh_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+        max_age=tokens.refresh_expires_in,
+    )
+    return resp
+
+
+# Demo workspace identifiers — must match scripts/seed_demo.py.
+_DEMO_TENANT = "local"
+_DEMO_SHARE_DOC_ID = "doc_demo_share"
+_DEMO_GROUP_ID = "dcgrp_demo"
+_DEMO_GUEST_EMAIL = "guest@example.com"
+_DEMO_GUEST_NAME = "Guest Investor"
+
+
+@router.get("/auth/demo/share")
+async def demo_share_redirect(request: Request):
+    """Short, copy-safe entry point that 302s to the seeded public share link.
+
+    The tokenized /view/<jwt> URL is ~350 chars and gets truncated when pasted;
+    this stable short link regenerates the token server-side and redirects.
+    """
+    if not getattr(request.app.state, "demo_mode", False):
+        raise HTTPException(404, "Not Found")
+    storage = request.app.state.storage
+    link_service = request.app.state.link_service
+    links = [
+        link
+        for link in await storage.list_share_links(
+            tenant_id=_DEMO_TENANT, document_id=_DEMO_SHARE_DOC_ID
+        )
+        if link.revoked_at is None
+    ]
+    if not links:
+        raise HTTPException(404, "Demo share link is not seeded yet")
+    token = await link_service.generate_share_token(links[0])
+    frontend = request.app.state.frontend_url
+    return RedirectResponse(f"{frontend}/view/{token}", status_code=302)
+
+
+@router.get("/auth/demo/room")
+async def demo_room_redirect(request: Request):
+    """Short, copy-safe entry point that 302s to a fresh external-room invite."""
+    if not getattr(request.app.state, "demo_mode", False):
+        raise HTTPException(404, "Not Found")
+    from app.auth.tenant_auth import TenantPrincipal
+
+    svc = request.app.state.external_room_access_service
+    provisioned = await svc.provision_room_access(
+        principal=TenantPrincipal(tenant_id=_DEMO_TENANT, user_id="demo-user"),
+        room_id=_DEMO_GROUP_ID,
+        recipient_email=_DEMO_GUEST_EMAIL,
+        recipient_display_name=_DEMO_GUEST_NAME,
+        can_download=False,
+        can_print=False,
+    )
+    frontend = request.app.state.frontend_url
+    return RedirectResponse(
+        f"{frontend}/external-room/invitations/{provisioned.invite_token}",
+        status_code=302,
+    )
+
+
 @router.get("/auth/callback")
 async def callback(
         request: Request,

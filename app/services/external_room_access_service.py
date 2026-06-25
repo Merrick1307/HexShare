@@ -124,13 +124,18 @@ class ExternalRoomAccessService:
         return jwt.encode(claims, self._jwt_secret, algorithm="HS256")
 
     def _decode_token(self, token: str, *, expected_use: str) -> dict:
-        payload = jwt.decode(
-            token,
-            self._jwt_secret,
-            algorithms=["HS256"],
-            audience=self._audience,
-            options={"require": ["exp", "iat", "tenant_id"]},
-        )
+        try:
+            payload = jwt.decode(
+                token,
+                self._jwt_secret,
+                algorithms=["HS256"],
+                audience=self._audience,
+                options={"require": ["exp", "iat", "tenant_id"]},
+            )
+        except jwt.PyJWTError as exc:
+            # Malformed / truncated / expired tokens become a domain error so
+            # callers return a clean 4xx instead of an unhandled 500.
+            raise ValueError("invalid_token") from exc
         if payload.get("token_use") != expected_use:
             raise ValueError("invalid_token_use")
         return payload

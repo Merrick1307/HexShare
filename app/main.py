@@ -3,6 +3,7 @@ Application entry point for HexShare.
 """
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -68,6 +69,20 @@ async def lifespan(fastapi_app: FastAPI):
         default=True,
     )
     frontend_url = os.getenv("HEXSHARE_FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    demo_mode = _to_bool(os.getenv("HEXSHARE_DEMO_MODE"), default=False)
+
+    if demo_mode:
+        logging.getLogger("hexshare").warning(
+            "DEMO MODE ENABLED — credential-free login (/api/auth/demo-login) is active "
+            "and the workspace is shared and public. Never set HEXSHARE_DEMO_MODE=true "
+            "in a real deployment."
+        )
+        if preferred_authenticator != "local":
+            logging.getLogger("hexshare").warning(
+                "HEXSHARE_DEMO_MODE is on but HEXSHARE_AUTHENTICATOR=%s; demo login "
+                "requires 'local' and will return 500 until that is set.",
+                preferred_authenticator,
+            )
 
     if preferred_authenticator == "local" and preferred_access_control == "hybrid":
         preferred_access_control = "edge"
@@ -172,6 +187,7 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.authenticator_mode = preferred_authenticator
     fastapi_app.state.local_session_service = local_session_service
     fastapi_app.state.frontend_url = frontend_url
+    fastapi_app.state.demo_mode = demo_mode
 
     yield
 

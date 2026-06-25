@@ -2,6 +2,23 @@
 
 HexShare is a self-hostable document sharing application for teams that need tighter control over sensitive files. It combines document uploads, group-based organization, protected share links, identified external data rooms, a session-aware viewer, and view analytics in a FastAPI + React stack.
 
+## Try it in 60 seconds
+
+No accounts, no config, no OAuth client:
+
+```bash
+docker compose -f docker-compose.demo.yaml up
+```
+
+Open <http://localhost:3000> and click **Try the demo** to land in a populated
+workspace. The stack also seeds a public, no-login share link and an external-room
+invite — both are printed to `./seed-output/demo-links.txt` once seeding finishes
+(open the invite and enter `guest@example.com`).
+
+> **Demo only.** `HEXSHARE_DEMO_MODE` enables a credential-free login and a single
+> shared, public workspace. Never use these settings in a real deployment. To reset
+> the demo, run `docker compose -f docker-compose.demo.yaml down -v`.
+
 ## What is in the project today
 
 - Document uploads with S3-compatible object storage targets

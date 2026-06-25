@@ -1,0 +1,160 @@
+# HexShare — one-command demo stack.
+#
+#   docker compose -f docker-compose.demo.yaml up
+#
+# No .env, no external accounts, no OAuth client. Boots Postgres + MinIO + the
+# API + frontend with the local (credential-free) auth stack, seeds a populated
+# workspace, and prints share/invite links to ./seed-output/demo-links.txt.
+#
+# DEMO ONLY. HEXSHARE_DEMO_MODE enables a credential-free login and a shared,
+# public workspace. Never use these settings or secrets in a real deployment.
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+
+x-app-image: &app-image
+  build: *app-build
+  image: hexshare-backend:${HEXSHARE_IMAGE_TAG:-latest}
+
+x-demo-env: &demo-env
+  DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
+  HEXSHARE_AUTHENTICATOR: local
+  HEXSHARE_ACCESS_CONTROL: edge
+  HEXSHARE_IAM_POLICY: local
+  HEXSHARE_STORAGE: postgres
+  HEXSHARE_OBJECT_STORAGE: s3
+  HEXSHARE_OBJECT_BUCKET: hexshare
+  HEXSHARE_OBJECT_PREFIX: documents
+  HEXSHARE_RENDERED_PAGE_CACHE: inmemory
+  HEXSHARE_TASK_QUEUE: noop
+  HEXSHARE_VIEWER_STRATEGY: secure_streaming
+  HEXSHARE_DOCUMENT_PROCESSING_ENABLED: "true"
+  HEXSHARE_DEMO_MODE: "true"
+  HEXSHARE_DEFAULT_OIDC_IDP: hexiam
+  HEXSHARE_LOCAL_TENANT_ID: local
+  HEXSHARE_AUTH_AUDIENCE: hexshare
+  HEXSHARE_JWT_SECRET: demo-not-secret-change-in-prod
+  HEXSHARE_SESSION_SECRET: demo-not-secret-change-in-prod
+  # Routes authenticate via the HS256 HEXIAMAuthenticator; for the local
+  # auth stack it must share the secret the local session tokens are signed
+  # with, and its expected audience (HEXSHARE_CLIENT_ID) must match the
+  # audience the local tokens carry (HEXSHARE_AUTH_AUDIENCE, below). The same
+  # client id also lets the (unused) default OIDC client construct.
+  HEXIAM_JWT_SECRET: demo-not-secret-change-in-prod
+  HEXSHARE_CLIENT_ID: hexshare
+  # No IAM server in the demo. Point JWKS at an address that refuses
+  # instantly so the HS256 authenticator's construction doesn't block on
+  # network timeouts at startup (it falls back to the shared secret above).
+  HEXIAM_JWKS_URL: http://127.0.0.1:1/jwks
+  HEXSHARE_PUBLIC_URL: http://localhost:8099
+  HEXSHARE_FRONTEND_URL: http://localhost:3000
+  HEXSHARE_DEMO_LINKS_PATH: /seed-output/demo-links.txt
+  AWS_ACCESS_KEY_ID: hexshare
+  AWS_SECRET_ACCESS_KEY: hexshare-demo-secret
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+  S3_REGION: us-east-1
+  S3_FORCE_PATH_STYLE: "true"
+
+services:
+  hexshare-migrate:
+    <<: *app-image
+    restart: "no"
+    environment: *demo-env
+    command: ["python", "-m", "run_migrations", "apply"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  hexshare-seed:
+    <<: *app-image
+    restart: "no"
+    environment:
+      <<: *demo-env
+      PYTHONPATH: /app
+    command: ["python", "scripts/seed_demo.py"]
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./seed-output:/seed-output
+    depends_on:
+      hexshare-migrate:
+        condition: service_completed_successfully
+      minio-create-bucket:
+        condition: service_completed_successfully
+
+  hexshare:
+    <<: *app-image
+    init: true
+    restart: unless-stopped
+    environment: *demo-env
+    ports:
+      - "${HEXSHARE_API_PORT:-8099}:8000"
+    depends_on:
+      hexshare-migrate:
+        condition: service_completed_successfully
+      minio-create-bucket:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  hexshare-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_BASE_PATH: /
+    image: hexshare-frontend:${HEXSHARE_FRONTEND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${HEXSHARE_FRONTEND_PORT:-3000}:80"
+    depends_on:
+      hexshare:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: hexshare
+      MINIO_ROOT_PASSWORD: hexshare-demo-secret
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:3000
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+
+  minio-create-bucket:
+    image: ${MINIO_MC_IMAGE:-minio/mc:latest}
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until /usr/bin/mc alias set local http://minio:9000 hexshare hexshare-demo-secret; do
+          sleep 1
+        done
+        /usr/bin/mc mb --ignore-existing local/hexshare

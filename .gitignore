@@ -211,3 +211,9 @@ __marimo__/
 docs
 .hexiam/
 .github
+
+# Personal / non-code notes
+documents/
+
+# Demo stack output (seeded share/invite links)
+seed-output/

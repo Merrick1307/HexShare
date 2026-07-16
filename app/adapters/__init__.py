@@ -20,6 +20,7 @@ from .authz import HexIAMAuthorizer
 from .object_storage import S3ObjectStorageAdapter, CloudFlareR2ObjectStorageAdapter, CloudinaryObjectStorageAdapter
 from .cache import InMemoryRenderedPageCache, RedisRenderedPageCache
 from .queue import NoopTaskQueue, ArqTaskQueue
+from .email import TransactionalEmailAdapter, NoopEmailAdapter, SmtpEmailAdapter
 
 
 __all__ = [
@@ -42,4 +43,7 @@ __all__ = [
     "RedisRenderedPageCache",
     "NoopTaskQueue",
     "ArqTaskQueue",
+    "TransactionalEmailAdapter",
+    "NoopEmailAdapter",
+    "SmtpEmailAdapter",
 ]

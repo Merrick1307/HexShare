@@ -13,6 +13,9 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters import NoopEventBus, JWTTokenAdapter
 from app.adapters.authz.hex_iam import HexIAMAuthorizer
+from app.adapters.email import TransactionalEmailAdapter, NoopEmailAdapter
+from app.adapters.email.template_loader import EmailTemplateLoader
+from app.adapters.event_dispatcher import EventDispatcher
 from app.adapters.oidc import GoogleOIDCClient, HexIAMOIDCClient
 from app.api.auth_oidc import router as auth_oidc_router
 from app.api.router import api_router
@@ -51,6 +54,14 @@ def _to_bool(value: str | None, *, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_email_adapter(adapter: str):
+    if adapter == "noop":
+        email_adapter = NoopEmailAdapter()
+    else:
+        email_adapter = TransactionalEmailAdapter()
+    return email_adapter
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     dp_pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
@@ -63,6 +74,7 @@ async def lifespan(fastapi_app: FastAPI):
     preferred_rendered_page_cache = os.getenv("HEXSHARE_RENDERED_PAGE_CACHE", "inmemory")
     preferred_task_queue = os.getenv("HEXSHARE_TASK_QUEUE", "noop")
     preferred_iam_policy = os.getenv("HEXSHARE_IAM_POLICY", "hexiam")
+    preferred_email_adapter = os.getenv("HEXSHARE_EMAIL_ADAPTER", "noop")
     pdp_iam_url = os.getenv("HEXIAM_PDP_URL") or os.getenv("HEXIAM_URL", "http://localhost:8000")
     viewer_strategy = os.getenv("HEXSHARE_VIEWER_STRATEGY", "secure_streaming").strip() or "secure_streaming"
     document_processing_enabled = _to_bool(
@@ -117,6 +129,13 @@ async def lifespan(fastapi_app: FastAPI):
         else None
     )
     event_bus = NoopEventBus()
+
+    # Initialize email adapter
+    email_adapter = get_email_adapter(preferred_email_adapter)
+
+    template_loader = EmailTemplateLoader()
+    event_dispatcher = EventDispatcher(event_bus=event_bus, email_service=email_adapter)
+
     document_service = DocumentService(persistence_layer, event_bus)
     document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
@@ -156,6 +175,9 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.task_queue = task_queue
     fastapi_app.state.token_adapter = token_adapter
     fastapi_app.state.event_bus = event_bus
+    fastapi_app.state.email_adapter = email_adapter
+    fastapi_app.state.template_loader = template_loader
+    fastapi_app.state.event_dispatcher = event_dispatcher
     fastapi_app.state.document_service = document_service
     fastapi_app.state.document_group_service = document_group_service
     fastapi_app.state.document_processor = document_processor

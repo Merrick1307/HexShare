@@ -1,0 +1,5 @@
+Hello {{ owner_name }},
+
+{{ accessed_by_name }} viewed your shared document "{{ document_name }}".
+
+Accessed at: {{ accessed_at }}

@@ -67,3 +67,15 @@ def get_oidc_client_service(request: Request):
 
 def get_iam_policy(request: Request):
     return request.app.state.iam_policy
+
+
+def get_email_adapter(request: Request):
+    return request.app.state.email_adapter
+
+
+def get_template_loader(request: Request):
+    return request.app.state.template_loader
+
+
+def get_event_dispatcher(request: Request):
+    return request.app.state.event_dispatcher

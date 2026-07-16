@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        h2 { color: #2c3e50; }
+        .success { color: #5cb85c; font-weight: bold; }
+        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Confirmation: {{ title }} Accepted</h2>
+        <p>Hello {{ recipient_name }},</p>
+        <p class="success">Thank you for accepting the NDA <strong>{{ title }}</strong>.</p>
+        <p><strong>Acceptance confirmed at:</strong> {{ accepted_at }}</p>
+        <p>You now have access to protected resources.</p>
+        <div class="footer">
+            <p>HexShare Document Management</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        h2 { color: #2c3e50; }
+        .warning-box { background-color: #fcf8e3; padding: 15px; border-left: 4px solid #d9534f; margin: 15px 0; }
+        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Access Expired: {{ document_name }}</h2>
+        <p>Hello {{ recipient_name }},</p>
+        <div class="warning-box">
+            <p>Your access to the document <strong>{{ document_name }}</strong> shared by {{ owner_name }} has expired.</p>
+            <p><strong>Expired at:</strong> {{ expired_at }}</p>
+        </div>
+        <p>Please contact {{ owner_name }} if you need continued access.</p>
+        <div class="footer">
+            <p>HexShare Document Management</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -22,6 +22,7 @@ from app.services.document_processor import (
 )
 from app.services.document_service import DocumentService
 from app.services.external_room_access_service import ExternalRoomPrincipal
+from app.services.nda_service import NdaService
 
 
 @dataclass(frozen=True)
@@ -82,13 +83,21 @@ class ExternalRoomViewerService:
         rendered_page_cache: RenderedPageCachePort,
         document_processor: DocumentProcessor,
         document_service: DocumentService,
+        nda_service: NdaService | None = None,
     ) -> None:
         self._storage = storage
         self._object_storage = object_storage
         self._rendered_page_cache = rendered_page_cache
         self._document_processor = document_processor
         self._document_service = document_service
+        self._nda_service = nda_service
         self._content_cache = _BytesCache(maxsize=50, ttl_seconds=300.0)
+
+    async def _enforce_nda(self, *, principal: ExternalRoomPrincipal, document: Document) -> None:
+        if self._nda_service is None:
+            return
+        subject = NdaService.subject_from_room_principal(principal)
+        await self._nda_service.require_all_accepted(document=document, subject=subject)
 
     @staticmethod
     def _now() -> datetime:
@@ -154,6 +163,7 @@ class ExternalRoomViewerService:
         )
         if document.room_id != principal.room_id:
             raise AccessDenied("Document is not part of this external room")
+        await self._enforce_nda(principal=principal, document=document)
         return document
 
     async def _resolve_session(

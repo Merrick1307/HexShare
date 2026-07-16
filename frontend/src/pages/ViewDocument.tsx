@@ -3,10 +3,11 @@ import { useParams } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import { Download, FileText, Lock, Printer } from 'lucide-react';
 import { api } from '../services/api';
-import { ShareInspection, ViewSession } from '../types';
+import { NdaStatus, ShareInspection, ViewSession } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+import { NdaGate } from '../components/NdaGate';
 
 type ViewerStatus = 'active' | 'revoked' | 'expired' | 'closed' | 'not_found';
 
@@ -125,6 +126,11 @@ export function ViewDocument() {
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const isOpeningSessionRef = useRef(false);
   const prefetchedPagesRef = useRef<Set<string>>(new Set());
+  const [ndaStatuses, setNdaStatuses] = useState<NdaStatus[]>([]);
+  const [ndaLoaded, setNdaLoaded] = useState(false);
+
+  const outstandingNda = ndaStatuses.filter((s) => s.required && !s.accepted);
+  const ndaBlocked = Boolean(session) && (!ndaLoaded || outstandingNda.length > 0);
 
   useEffect(() => {
     if (token) void inspectToken(token);
@@ -200,11 +206,56 @@ export function ViewDocument() {
   }, [inspection]);
 
   useEffect(() => {
+    if (!session) {
+      setNdaStatuses([]);
+      setNdaLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getShareNda(session.session_id)
+      .then((statuses) => {
+        if (!cancelled) {
+          setNdaStatuses(statuses);
+          setNdaLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNdaStatuses([]);
+          setNdaLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  async function reloadShareNda() {
+    if (!session) return;
+    const statuses = await api.getShareNda(session.session_id);
+    setNdaStatuses(statuses);
+  }
+
+  async function handleAcceptShareNda(
+    status: NdaStatus,
+    payload: { typed_name: string; scroll_confirmed: boolean; checkbox_confirmed: boolean },
+  ) {
+    if (!session || !status.policy) return;
+    await api.acceptShareNda(session.session_id, {
+      scope_type: status.policy.scope_type,
+      scope_id: status.policy.scope_id,
+      ...payload,
+    });
+    await reloadShareNda();
+  }
+
+  useEffect(() => {
     pageRefs.current = {};
     prefetchedPagesRef.current.clear();
     setActivePage(1);
 
-    if (!session || viewerStatus !== 'active') {
+    if (!session || viewerStatus !== 'active' || ndaBlocked) {
       setPreview({ kind: 'idle' });
       return;
     }
@@ -282,7 +333,7 @@ export function ViewDocument() {
     return () => {
       cancelled = true;
     };
-  }, [session, viewerStatus]);
+  }, [session, viewerStatus, ndaBlocked]);
 
   useEffect(() => {
     if (preview.kind !== 'pdf_pages') return;
@@ -381,6 +432,23 @@ export function ViewDocument() {
   }
 
   if (!session) return null;
+
+  if (!ndaLoaded) {
+    return <div className="flex min-h-screen items-center justify-center bg-zinc-50 text-sm text-zinc-500">Checking access requirements…</div>;
+  }
+
+  if (outstandingNda.length > 0) {
+    const status = outstandingNda[0];
+    const pdfUrl =
+      status.policy?.content_type === 'pdf'
+        ? api.toAbsoluteApiUrl(api.shareNdaPdfUrl(session.session_id, status.policy.scope_type, status.policy.scope_id))
+        : null;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
+        <NdaGate status={status} pdfUrl={pdfUrl} onAccept={(p) => handleAcceptShareNda(status, p)} />
+      </div>
+    );
+  }
 
   const renderPreview = () => {
     if (viewerStatus !== 'active') {

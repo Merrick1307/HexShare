@@ -79,7 +79,24 @@ class ExternalRoomEventType(str, Enum):
     DOCUMENT_PAGE_VIEW = "document_page_view"
     DOCUMENT_VIEW_CLOSE = "document_view_close"
     DOCUMENT_DOWNLOAD = "document_download"
+    NDA_ACCEPTED = "nda_accepted"
     ROOM_CLOSE = "room_close"
+
+
+class NdaScopeType(str, Enum):
+    ROOM = "room"
+    DOCUMENT = "document"
+
+
+class NdaContentType(str, Enum):
+    TEXT = "text"
+    PDF = "pdf"
+
+
+class NdaSubjectKind(str, Enum):
+    EXTERNAL_PARTY = "external_party"
+    VISITOR_EMAIL = "visitor_email"
+    VISITOR_SESSION = "visitor_session"
 
 
 class Document(BaseModel):
@@ -325,3 +342,51 @@ class ViewEvent(BaseModel):
         if event_type == EventType.PAGE_VIEW and v is None:
             raise ValueError("page_number is required for page_view events")
         return v
+
+
+class NdaPolicy(BaseModel):
+    """An NDA attached to a room (document group) or an individual document.
+
+    Exactly one active policy exists per ``(tenant, scope_type, scope_id)``.
+    ``version`` is bumped whenever the content changes, which invalidates prior
+    acceptances and forces recipients to re-accept.
+    """
+
+    id: str
+    tenant_id: str
+    scope_type: NdaScopeType
+    scope_id: str
+    version: int = 1
+    title: Optional[str] = None
+    content_type: NdaContentType = NdaContentType.TEXT
+    text_body: Optional[str] = None
+    text_storage_key: Optional[str] = None
+    pdf_storage_key: Optional[str] = None
+    require_scroll: bool = True
+    require_typed_signature: bool = True
+    active: bool = True
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class NdaAcceptance(BaseModel):
+    """An immutable record that a subject accepted a specific NDA version."""
+
+    id: str
+    tenant_id: str
+    nda_policy_id: str
+    scope_type: NdaScopeType
+    scope_id: str
+    nda_version: int
+    subject_kind: NdaSubjectKind
+    subject_id: str
+    external_party_id: Optional[str] = None
+    presented_email: Optional[str] = None
+    typed_name: str
+    scroll_confirmed: bool
+    checkbox_confirmed: bool
+    session_id: Optional[str] = None
+    ip_hash: Optional[str] = None
+    ua_hash: Optional[str] = None
+    accepted_at: datetime

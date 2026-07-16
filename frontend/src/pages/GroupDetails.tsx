@@ -25,6 +25,7 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { NdaAdminPanel } from '../components/NdaAdminPanel';
 
 type WorkspaceUser = { id: string; user_id?: string; email?: string; name?: string; username?: string };
 
@@ -212,6 +213,7 @@ export function GroupDetails() {
       setLatestProvision(provision);
       setSuccessMessage('External room access provisioned.');
       setExternalAccess(await api.listExternalRoomAccess(id));
+      setIsExternalAccessModalOpen(false);
     } catch (err) {
       setExternalAccessError(err instanceof Error ? err.message : 'Failed to provision external access');
     } finally {
@@ -308,6 +310,8 @@ export function GroupDetails() {
       </div>
 
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
+
+      {id ? <NdaAdminPanel scope="room" id={id} /> : null}
 
       {latestProvision && latestInviteUrl ? (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-4 text-sm text-indigo-900">

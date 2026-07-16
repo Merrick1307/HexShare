@@ -23,6 +23,8 @@ from app.domain import (
     ExternalPartyEmail,
     ExternalRoomEvent,
     ExternalRoomSession,
+    NdaAcceptance,
+    NdaPolicy,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -303,3 +305,69 @@ class StoragePort(ABC):
         self, *, tenant_id: str, event_id: str, duration_ms: int
     ) -> None:
         """Persist a computed duration for an existing external room event."""
+
+    # -- NDA policies & acceptances -------------------------------------------------
+
+    @abstractmethod
+    async def save_nda_policy(self, policy: "NdaPolicy") -> None:
+        """Insert or replace the NDA policy for a scope (upsert on scope)."""
+
+    @abstractmethod
+    async def get_nda_policy(
+        self, *, tenant_id: str, scope_type: str, scope_id: str, active_only: bool = True
+    ) -> Optional["NdaPolicy"]:
+        """Return the NDA policy for a room/document scope if one exists."""
+
+    @abstractmethod
+    async def deactivate_nda_policy(
+        self, *, tenant_id: str, scope_type: str, scope_id: str
+    ) -> None:
+        """Mark a scope's NDA policy inactive (removes the gate)."""
+
+    @abstractmethod
+    async def save_nda_acceptance(self, acceptance: "NdaAcceptance") -> None:
+        """Persist an immutable NDA acceptance record."""
+
+    @abstractmethod
+    async def get_nda_acceptance(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_id: str,
+        nda_version: int,
+        subject_kind: str,
+        subject_id: str,
+    ) -> Optional["NdaAcceptance"]:
+        """Return the acceptance for a subject against a specific NDA version, if any."""
+
+    @abstractmethod
+    async def list_nda_acceptances(
+        self, *, tenant_id: str, scope_type: str, scope_id: str
+    ) -> Iterable["NdaAcceptance"]:
+        """List all acceptances recorded for a scope (audit view)."""
+
+    @abstractmethod
+    async def list_nda_policies(
+        self, *, tenant_id: str, active_only: bool = True
+    ) -> Iterable["NdaPolicy"]:
+        """List every NDA policy for a tenant (workspace compliance view)."""
+
+    # -- Workspace-wide aggregates (dashboards) -------------------------------------
+
+    @abstractmethod
+    async def get_workspace_summary(self, *, tenant_id: str) -> dict:
+        """Return counts for the workspace dashboard: documents, groups,
+        active_links, external_recipients, document_opens."""
+
+    @abstractmethod
+    async def list_recent_view_events(
+        self, *, tenant_id: str, limit: int = 100
+    ) -> Iterable["ViewEvent"]:
+        """Most-recent share-link view events across the tenant."""
+
+    @abstractmethod
+    async def list_recent_external_room_events(
+        self, *, tenant_id: str, limit: int = 100
+    ) -> Iterable["ExternalRoomEvent"]:
+        """Most-recent external-room events across the tenant."""

@@ -22,6 +22,7 @@ import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { NdaAdminPanel } from '../components/NdaAdminPanel';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -332,6 +333,8 @@ export function DocumentDetails() {
               <div><p className="font-medium text-zinc-900">Storage key</p><code className="block break-all rounded bg-zinc-50 px-2 py-1 text-xs">{document.storage_key}</code></div>
             </CardContent>
           </Card>
+
+          {id ? <NdaAdminPanel scope="document" id={id} /> : null}
         </div>
       </div>
 

@@ -146,6 +146,92 @@ export interface ExternalRoomSession {
   email: string;
 }
 
+export interface NdaPolicyView {
+  scope_type: string;
+  scope_id: string;
+  version: number;
+  title: string | null;
+  content_type: string;
+  require_scroll: boolean;
+  require_typed_signature: boolean;
+}
+
+export interface NdaStatus {
+  required: boolean;
+  accepted: boolean;
+  policy: NdaPolicyView | null;
+  text_body: string | null;
+  pdf_available: boolean;
+}
+
+export interface NdaAcceptPayload {
+  scope_type: string;
+  scope_id: string;
+  typed_name: string;
+  scroll_confirmed: boolean;
+  checkbox_confirmed: boolean;
+}
+
+export interface NdaPolicyAdminView {
+  scope_type: string;
+  scope_id: string;
+  version: number;
+  title: string | null;
+  content_type: string;
+  require_scroll: boolean;
+  require_typed_signature: boolean;
+  active: boolean;
+  has_pdf: boolean;
+  updated_at: string;
+}
+
+export interface WorkspaceSummary {
+  documents: number;
+  groups: number;
+  active_links: number;
+  external_recipients: number;
+  document_opens: number;
+}
+
+export interface ActivityItem {
+  timestamp: string;
+  source: string;
+  event_type: string;
+  document_id: string | null;
+  document_name: string | null;
+  room_id: string | null;
+  room_name: string | null;
+  page_number: number | null;
+  actor: string | null;
+}
+
+export interface NdaPolicySummary {
+  scope_type: string;
+  scope_id: string;
+  scope_name: string | null;
+  version: number;
+  title: string | null;
+  content_type: string;
+  require_scroll: boolean;
+  require_typed_signature: boolean;
+  acceptance_count: number;
+  updated_at: string;
+}
+
+export interface NdaAcceptanceRecord {
+  id: string;
+  scope_type: string;
+  scope_id: string;
+  nda_version: number;
+  subject_kind: string;
+  subject_id: string;
+  presented_email: string | null;
+  typed_name: string;
+  scroll_confirmed: boolean;
+  checkbox_confirmed: boolean;
+  accepted_at: string;
+}
+
 export interface ExternalRoomContext {
   room_id: string;
   room_name: string;
@@ -153,6 +239,7 @@ export interface ExternalRoomContext {
   email: string;
   can_download: boolean;
   can_print: boolean;
+  nda?: NdaStatus | null;
 }
 
 export interface ExternalRoomDocumentSession {

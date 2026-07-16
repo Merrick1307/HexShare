@@ -23,6 +23,8 @@ from app.domain import (
     ExternalPartyEmail,
     ExternalRoomEvent,
     ExternalRoomSession,
+    NdaAcceptance,
+    NdaPolicy,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -50,6 +52,9 @@ class MemoryStorage(StoragePort):
         self._external_access_grants: Dict[str, Dict[str, ExternalAccessGrant]] = defaultdict(dict)
         self._external_room_sessions: Dict[str, Dict[str, ExternalRoomSession]] = defaultdict(dict)
         self._external_room_events: Dict[str, List[ExternalRoomEvent]] = defaultdict(list)
+        # tenant_id -> {(scope_type, scope_id): NdaPolicy}
+        self._nda_policies: Dict[str, Dict[tuple, NdaPolicy]] = defaultdict(dict)
+        self._nda_acceptances: Dict[str, List[NdaAcceptance]] = defaultdict(list)
         self._id_counter = 0
 
     def generate_id(self, prefix: str) -> str:
@@ -391,6 +396,114 @@ class MemoryStorage(StoragePort):
             if event.id == event_id:
                 self._external_room_events[tenant_id][index] = event.copy(update={"duration_ms": duration_ms})
                 return
+
+    async def save_nda_policy(self, policy: NdaPolicy) -> None:
+        key = (policy.scope_type.value, policy.scope_id)
+        self._nda_policies[policy.tenant_id][key] = policy
+
+    async def get_nda_policy(
+        self, *, tenant_id: str, scope_type: str, scope_id: str, active_only: bool = True
+    ) -> Optional[NdaPolicy]:
+        policy = self._nda_policies.get(tenant_id, {}).get((scope_type, scope_id))
+        if policy is None:
+            return None
+        if active_only and not policy.active:
+            return None
+        return policy
+
+    async def deactivate_nda_policy(
+        self, *, tenant_id: str, scope_type: str, scope_id: str
+    ) -> None:
+        key = (scope_type, scope_id)
+        policy = self._nda_policies.get(tenant_id, {}).get(key)
+        if policy is not None:
+            self._nda_policies[tenant_id][key] = policy.copy(update={"active": False})
+
+    async def save_nda_acceptance(self, acceptance: NdaAcceptance) -> None:
+        self._nda_acceptances[acceptance.tenant_id].append(acceptance)
+
+    async def get_nda_acceptance(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_id: str,
+        nda_version: int,
+        subject_kind: str,
+        subject_id: str,
+    ) -> Optional[NdaAcceptance]:
+        for record in self._nda_acceptances.get(tenant_id, []):
+            if (
+                record.scope_type.value == scope_type
+                and record.scope_id == scope_id
+                and record.nda_version == nda_version
+                and record.subject_kind.value == subject_kind
+                and record.subject_id == subject_id
+            ):
+                return record
+        return None
+
+    async def list_nda_acceptances(
+        self, *, tenant_id: str, scope_type: str, scope_id: str
+    ) -> Iterable[NdaAcceptance]:
+        return [
+            record
+            for record in self._nda_acceptances.get(tenant_id, [])
+            if record.scope_type.value == scope_type and record.scope_id == scope_id
+        ]
+
+    async def list_nda_policies(
+        self, *, tenant_id: str, active_only: bool = True
+    ) -> Iterable[NdaPolicy]:
+        policies = list(self._nda_policies.get(tenant_id, {}).values())
+        if active_only:
+            policies = [p for p in policies if p.active]
+        return sorted(policies, key=lambda p: p.updated_at, reverse=True)
+
+    async def get_workspace_summary(self, *, tenant_id: str) -> dict:
+        now = datetime.utcnow()
+        active_links = [
+            link
+            for link in self._share_links.get(tenant_id, {}).values()
+            if link.revoked_at is None and link.expires_at > now
+        ]
+        external_parties = [
+            party
+            for party in self._external_parties.get(tenant_id, {}).values()
+            if party.status.value == "active"
+        ]
+        opens = sum(
+            1
+            for e in self._view_events.get(tenant_id, [])
+            if e.event_type == EventType.OPEN
+        ) + sum(
+            1
+            for e in self._external_room_events.get(tenant_id, [])
+            if e.event_type == "document_view_open"
+        )
+        return {
+            "documents": len(self._documents.get(tenant_id, {})),
+            "groups": len(self._doc_groups.get(tenant_id, {})),
+            "active_links": len(active_links),
+            "external_recipients": len(external_parties),
+            "document_opens": opens,
+        }
+
+    async def list_recent_view_events(
+        self, *, tenant_id: str, limit: int = 100
+    ) -> Iterable[ViewEvent]:
+        events = sorted(
+            self._view_events.get(tenant_id, []), key=lambda e: e.timestamp, reverse=True
+        )
+        return events[:limit]
+
+    async def list_recent_external_room_events(
+        self, *, tenant_id: str, limit: int = 100
+    ) -> Iterable[ExternalRoomEvent]:
+        events = sorted(
+            self._external_room_events.get(tenant_id, []), key=lambda e: e.timestamp, reverse=True
+        )
+        return events[:limit]
 
 
 @StorageFactory.register("memory")

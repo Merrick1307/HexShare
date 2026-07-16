@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Folder, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -9,6 +10,84 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
+
+function GroupRowMenu({
+  group,
+  isOpen,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  group: DocumentGroup;
+  isOpen: boolean;
+  onToggle: () => void;
+  onEdit: (group: DocumentGroup) => void;
+  onDelete: (group: DocumentGroup) => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuContentRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setPos(null);
+      return;
+    }
+    const update = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (rect) setPos({ top: rect.bottom + 8, left: rect.right - 160 }); // 160px = w-40
+    };
+    update();
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || menuContentRef.current?.contains(target)) return;
+      onToggle();
+    }
+    document.addEventListener('mousedown', handleClick);
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [isOpen, onToggle]);
+
+  return (
+    <div className="relative inline-block text-left">
+      <Button ref={buttonRef} type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={onToggle}>
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
+      {isOpen && pos
+        ? createPortal(
+            <div
+              ref={menuContentRef}
+              style={{ position: 'fixed', top: pos.top, left: pos.left }}
+              className="z-50 w-40 rounded-xl border border-zinc-200 bg-white p-1 shadow-xl"
+            >
+              <button
+                type="button"
+                onClick={() => onEdit(group)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(group)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
 
 export function Groups() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -32,18 +111,6 @@ export function Groups() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<DocumentGroup | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!openMenuId) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpenMenuId(null);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [openMenuId]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({ name: '', description: '' });
@@ -127,14 +194,12 @@ export function Groups() {
   }
 
   function openEditModal(group: DocumentGroup) {
-    setOpenMenuId(null);
     setSelectedGroup(group);
     setFormData({ name: group.name, description: group.description || '' });
     setIsEditModalOpen(true);
   }
 
   function openDeleteModal(group: DocumentGroup) {
-    setOpenMenuId(null);
     setSelectedGroup(group);
     setIsDeleteModalOpen(true);
   }
@@ -193,22 +258,14 @@ export function Groups() {
                   </td>
                   <td className="px-6 py-4 text-zinc-600">{group.description || <span className="text-zinc-400">—</span>}</td>
                   <td className="px-6 py-4 text-zinc-600">{format(new Date(group.created_at), 'MMM d, yyyy')}</td>
-                  <td className="relative overflow-visible px-6 py-4 text-right">
-                    <div ref={menuRef} className="relative inline-block text-left">
-                      <Button type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setOpenMenuId(openMenuId === group.id ? null : group.id)}>
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                      {openMenuId === group.id && (
-                        <div className="absolute right-0 top-full z-50 mt-2 w-40 rounded-xl border border-zinc-200 bg-white p-1 shadow-xl">
-                          <button type="button" onClick={() => openEditModal(group)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50">
-                            <Pencil className="h-4 w-4" /> Edit
-                          </button>
-                          <button type="button" onClick={() => openDeleteModal(group)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
-                            <Trash2 className="h-4 w-4" /> Delete
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                  <td className="px-6 py-4 text-right">
+                    <GroupRowMenu
+                      group={group}
+                      isOpen={openMenuId === group.id}
+                      onToggle={() => setOpenMenuId((current) => (current === group.id ? null : group.id))}
+                      onEdit={openEditModal}
+                      onDelete={openDeleteModal}
+                    />
                   </td>
                 </tr>
               ))

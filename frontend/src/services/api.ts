@@ -8,7 +8,14 @@ import {
   ExternalRoomGrant,
   ExternalRoomInviteInspection,
   ExternalRoomSession,
+  ActivityItem,
+  NdaAcceptPayload,
+  NdaAcceptanceRecord,
+  NdaPolicyAdminView,
+  NdaPolicySummary,
+  NdaStatus,
   PaginatedResponse,
+  WorkspaceSummary,
   ProvisionExternalRoomAccessResponse,
   ShareInspection,
   ShareLink,
@@ -375,6 +382,80 @@ export const api = {
     return response;
   },
 
+  async getWorkspaceSummary(): Promise<WorkspaceSummary> {
+    return fetchWithAuth<WorkspaceSummary>(`${API_PREFIX}/workspace/summary`);
+  },
+
+  async getActivity(limit = 50): Promise<ActivityItem[]> {
+    return fetchWithAuth<ActivityItem[]>(`${API_PREFIX}/activity?limit=${limit}`);
+  },
+
+  async listNdaPolicies(): Promise<NdaPolicySummary[]> {
+    return fetchWithAuth<NdaPolicySummary[]>(`${API_PREFIX}/nda/policies`);
+  },
+
+  async getShareNda(sessionId: string): Promise<NdaStatus[]> {
+    return fetchPublic<NdaStatus[]>(`${API_PREFIX}/view-sessions/${sessionId}/nda`);
+  },
+
+  async acceptShareNda(sessionId: string, payload: NdaAcceptPayload): Promise<void> {
+    await fetchPublic<void>(`${API_PREFIX}/view-sessions/${sessionId}/nda/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  shareNdaPdfUrl(sessionId: string, scopeType: string, scopeId: string): string {
+    return `${API_PREFIX}/view-sessions/${sessionId}/nda/pdf?scope_type=${encodeURIComponent(scopeType)}&scope_id=${encodeURIComponent(scopeId)}`;
+  },
+
+  async getDocumentNda(documentId: string): Promise<NdaPolicyAdminView | null> {
+    return fetchWithAuth<NdaPolicyAdminView | null>(`${API_PREFIX}/documents/${documentId}/nda`);
+  },
+  async setDocumentNdaText(documentId: string, data: { title?: string; text_body: string; require_scroll: boolean; require_typed_signature: boolean }): Promise<NdaPolicyAdminView> {
+    return fetchWithAuth<NdaPolicyAdminView>(`${API_PREFIX}/documents/${documentId}/nda`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    });
+  },
+  async setDocumentNdaPdf(documentId: string, file: File, opts: { title?: string; require_scroll: boolean; require_typed_signature: boolean }): Promise<NdaPolicyAdminView> {
+    const form = new FormData();
+    form.append('pdf', file);
+    if (opts.title) form.append('title', opts.title);
+    form.append('require_scroll', String(opts.require_scroll));
+    form.append('require_typed_signature', String(opts.require_typed_signature));
+    return fetchWithAuth<NdaPolicyAdminView>(`${API_PREFIX}/documents/${documentId}/nda/pdf`, { method: 'POST', body: form });
+  },
+  async deleteDocumentNda(documentId: string): Promise<void> {
+    await fetchWithAuth<void>(`${API_PREFIX}/documents/${documentId}/nda`, { method: 'DELETE' });
+  },
+  async listDocumentNdaAcceptances(documentId: string): Promise<NdaAcceptanceRecord[]> {
+    return fetchWithAuth<NdaAcceptanceRecord[]>(`${API_PREFIX}/documents/${documentId}/nda/acceptances`);
+  },
+
+  async getGroupNda(groupId: string): Promise<NdaPolicyAdminView | null> {
+    return fetchWithAuth<NdaPolicyAdminView | null>(`${API_PREFIX}/document-groups/${groupId}/nda`);
+  },
+  async setGroupNdaText(groupId: string, data: { title?: string; text_body: string; require_scroll: boolean; require_typed_signature: boolean }): Promise<NdaPolicyAdminView> {
+    return fetchWithAuth<NdaPolicyAdminView>(`${API_PREFIX}/document-groups/${groupId}/nda`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    });
+  },
+  async setGroupNdaPdf(groupId: string, file: File, opts: { title?: string; require_scroll: boolean; require_typed_signature: boolean }): Promise<NdaPolicyAdminView> {
+    const form = new FormData();
+    form.append('pdf', file);
+    if (opts.title) form.append('title', opts.title);
+    form.append('require_scroll', String(opts.require_scroll));
+    form.append('require_typed_signature', String(opts.require_typed_signature));
+    return fetchWithAuth<NdaPolicyAdminView>(`${API_PREFIX}/document-groups/${groupId}/nda/pdf`, { method: 'POST', body: form });
+  },
+  async deleteGroupNda(groupId: string): Promise<void> {
+    await fetchWithAuth<void>(`${API_PREFIX}/document-groups/${groupId}/nda`, { method: 'DELETE' });
+  },
+  async listGroupNdaAcceptances(groupId: string): Promise<NdaAcceptanceRecord[]> {
+    return fetchWithAuth<NdaAcceptanceRecord[]>(`${API_PREFIX}/document-groups/${groupId}/nda/acceptances`);
+  },
+
   async sendPageView(sessionId: string, pageNumber: number): Promise<void> {
     await fetchPublic<void>(`${API_PREFIX}/view-sessions/${sessionId}/page-view?page_number=${pageNumber}`, {
       method: 'POST',
@@ -491,6 +572,23 @@ export const api = {
 
   async listExternalRoomDocuments(): Promise<Document[]> {
     return fetchExternal<Document[]>(`${API_PREFIX}/external-room/current/documents`);
+  },
+
+  async getExternalRoomNda(documentId?: string): Promise<NdaStatus[]> {
+    const q = documentId ? `?document_id=${encodeURIComponent(documentId)}` : '';
+    return fetchExternal<NdaStatus[]>(`${API_PREFIX}/external-room/current/nda${q}`);
+  },
+
+  async acceptExternalRoomNda(payload: NdaAcceptPayload): Promise<void> {
+    await fetchExternal<void>(`${API_PREFIX}/external-room/current/nda/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  externalRoomNdaPdfUrl(scopeType: string, scopeId: string): string {
+    return `${API_PREFIX}/external-room/current/nda/pdf?scope_type=${encodeURIComponent(scopeType)}&scope_id=${encodeURIComponent(scopeId)}`;
   },
 
   async getExternalRoomDocumentDownload(documentId: string, expiresIn = 900): Promise<DownloadUrlResponse> {

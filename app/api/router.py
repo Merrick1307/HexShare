@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from app.api.dependencies.services import (
@@ -17,7 +17,9 @@ from app.api.dependencies.services import (
     get_external_room_viewer_service,
     get_iam_policy,
     get_link_service,
+    get_nda_service,
     get_share_auth,
+    get_storage,
     get_upload_service,
     get_viewer_service,
 )
@@ -26,8 +28,17 @@ from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
-from app.domain import Document, DocumentGroup, ShareLink
+from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, ShareLink
 from app.ports.access_control import AccessDenied
+from app.schemas.nda import (
+    NdaAcceptRequest,
+    NdaAcceptResponse,
+    NdaAcceptanceRecordView,
+    NdaPolicyAdminView,
+    NdaPolicyView,
+    NdaStatusResponse,
+    SetNdaTextRequest,
+)
 from app.schemas.external_room import (
     CreateExternalRoomSessionRequest,
     ExternalRoomContextResponse,
@@ -39,6 +50,11 @@ from app.schemas.external_room import (
 )
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.share import ShareLinkResponse
+from app.schemas.workspace import (
+    ActivityItemResponse,
+    NdaPolicySummaryResponse,
+    WorkspaceSummaryResponse,
+)
 from app.schemas.upload import DownloadUrlResponse
 from app.schemas.viewer import (
     CreateViewSessionRequest,
@@ -55,6 +71,9 @@ from app.services import (
     ExternalRoomPrincipal,
     ExternalRoomViewerService,
     LinkService,
+    NdaError,
+    NdaService,
+    NdaSubject,
     UploadService,
     ViewerService,
 )
@@ -117,6 +136,56 @@ def external_room_document_watermark(principal: ExternalRoomPrincipal) -> str:
     if principal.display_name:
         identifier = f"{principal.display_name} <{principal.email}>"
     return f"HexShare - {identifier}"
+
+
+def _build_nda_status(policy, accepted: bool, *, include_text: bool = True) -> NdaStatusResponse:
+    if policy is None:
+        return NdaStatusResponse(required=False, accepted=True)
+    return NdaStatusResponse(
+        required=True,
+        accepted=accepted,
+        policy=NdaPolicyView(
+            scope_type=policy.scope_type.value,
+            scope_id=policy.scope_id,
+            version=policy.version,
+            title=policy.title,
+            content_type=policy.content_type.value,
+            require_scroll=policy.require_scroll,
+            require_typed_signature=policy.require_typed_signature,
+        ),
+        text_body=policy.text_body if (include_text and policy.content_type == NdaContentType.TEXT) else None,
+        pdf_available=policy.content_type == NdaContentType.PDF,
+    )
+
+
+async def _load_recipient_nda_policy(nda_service, *, tenant_id, room_id, scope_type, scope_id):
+    """Fetch an NDA policy a room recipient is allowed to read (room-scope must be
+    their own room; document-scope is allowed within that room)."""
+    if scope_type not in ("room", "document"):
+        raise HTTPException(status_code=400, detail="invalid_scope_type")
+    if scope_type == "room" and scope_id != room_id:
+        raise HTTPException(status_code=404, detail="nda_not_found")
+    policy = await nda_service.get_policy(
+        tenant_id=tenant_id, scope_type=NdaScopeType(scope_type), scope_id=scope_id
+    )
+    if policy is None:
+        raise HTTPException(status_code=404, detail="nda_not_found")
+    return policy
+
+
+def _admin_policy_view(policy) -> NdaPolicyAdminView:
+    return NdaPolicyAdminView(
+        scope_type=policy.scope_type.value,
+        scope_id=policy.scope_id,
+        version=policy.version,
+        title=policy.title,
+        content_type=policy.content_type.value,
+        require_scroll=policy.require_scroll,
+        require_typed_signature=policy.require_typed_signature,
+        active=policy.active,
+        has_pdf=policy.content_type == NdaContentType.PDF,
+        updated_at=policy.updated_at,
+    )
 
 
 def _serialize_external_room_document_session(
@@ -835,6 +904,7 @@ def api_router() -> APIRouter:
     async def get_external_room_context(
         principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
         group_service: DocumentGroupService = Depends(get_document_group_service),
+        nda_service: NdaService = Depends(get_nda_service),
     ) -> ExternalRoomContextResponse:
         try:
             group = await group_service.get_group(
@@ -844,6 +914,10 @@ def api_router() -> APIRouter:
             )
         except AccessDenied:
             raise HTTPException(status_code=403, detail="Forbidden")
+        subject = NdaService.subject_from_room_principal(principal)
+        policy, accepted = await nda_service.room_policy_status(
+            tenant_id=principal.tenant_id, room_id=principal.room_id, subject=subject
+        )
         return ExternalRoomContextResponse(
             room_id=group.id,
             room_name=group.name,
@@ -851,6 +925,7 @@ def api_router() -> APIRouter:
             email=principal.email,
             can_download=principal.can_download,
             can_print=principal.can_print,
+            nda=_build_nda_status(policy, accepted),
         )
 
     @router.get("/external-room/current/documents", response_model=list[Document])
@@ -858,7 +933,13 @@ def api_router() -> APIRouter:
         principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
         group_service: DocumentGroupService = Depends(get_document_group_service),
         external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+        nda_service: NdaService = Depends(get_nda_service),
     ) -> list[Document]:
+        # Room-level NDA blocks the whole room, including the document list.
+        subject = NdaService.subject_from_room_principal(principal)
+        await nda_service.require_room_accepted(
+            tenant_id=principal.tenant_id, room_id=principal.room_id, subject=subject
+        )
         try:
             docs = await group_service.list_group_documents(
                 principal=principal.as_tenant_principal(),
@@ -868,6 +949,495 @@ def api_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="Forbidden")
         await external_room_access_service.record_document_list(principal=principal)
         return list(docs)
+
+    @router.get("/external-room/current/nda", response_model=list[NdaStatusResponse])
+    async def get_external_room_nda(
+        document_id: str | None = Query(default=None),
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        nda_service: NdaService = Depends(get_nda_service),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> list[NdaStatusResponse]:
+        """Applicable NDA statuses (with text content). Room-scope by default; when
+        ``document_id`` is given, returns the room + that document's NDAs."""
+        subject = NdaService.subject_from_room_principal(principal)
+        statuses: list[NdaStatusResponse] = []
+        room_policy, room_accepted = await nda_service.room_policy_status(
+            tenant_id=principal.tenant_id, room_id=principal.room_id, subject=subject
+        )
+        if room_policy is not None:
+            statuses.append(_build_nda_status(room_policy, room_accepted))
+        if document_id:
+            document = await document_service.get_document(
+                tenant_id=principal.tenant_id, document_id=document_id
+            )
+            if document and document.room_id == principal.room_id:
+                doc_policy = await nda_service.get_policy(
+                    tenant_id=principal.tenant_id, scope_type=NdaScopeType.DOCUMENT, scope_id=document.id
+                )
+                if doc_policy is not None:
+                    _, doc_accepted = await nda_service.policy_status(policy=doc_policy, subject=subject)
+                    statuses.append(_build_nda_status(doc_policy, doc_accepted))
+        return statuses
+
+    @router.get("/external-room/current/nda/pdf")
+    async def get_external_room_nda_pdf(
+        scope_type: str = Query(...),
+        scope_id: str = Query(...),
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        nda_service: NdaService = Depends(get_nda_service),
+    ) -> StreamingResponse:
+        policy = await _load_recipient_nda_policy(
+            nda_service, tenant_id=principal.tenant_id, room_id=principal.room_id,
+            scope_type=scope_type, scope_id=scope_id,
+        )
+        pdf = await nda_service.get_pdf_bytes(policy=policy)
+        return StreamingResponse(
+            iter([pdf]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": "inline; filename=nda.pdf", "Cache-Control": "private, no-store"},
+        )
+
+    @router.post("/external-room/current/nda/accept", response_model=NdaAcceptResponse)
+    async def accept_external_room_nda(
+        payload: NdaAcceptRequest,
+        request: Request,
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        nda_service: NdaService = Depends(get_nda_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(get_external_room_access_service),
+    ) -> NdaAcceptResponse:
+        policy = await _load_recipient_nda_policy(
+            nda_service, tenant_id=principal.tenant_id, room_id=principal.room_id,
+            scope_type=payload.scope_type, scope_id=payload.scope_id,
+        )
+        subject = NdaService.subject_from_room_principal(principal)
+        try:
+            acceptance = await nda_service.accept(
+                policy=policy,
+                subject=subject,
+                typed_name=payload.typed_name,
+                scroll_confirmed=payload.scroll_confirmed,
+                checkbox_confirmed=payload.checkbox_confirmed,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except NdaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        await external_room_access_service.record_nda_accepted(
+            principal=principal,
+            document_id=policy.scope_id if policy.scope_type == NdaScopeType.DOCUMENT else None,
+        )
+        return NdaAcceptResponse(
+            accepted=True,
+            scope_type=acceptance.scope_type.value,
+            scope_id=acceptance.scope_id,
+            version=acceptance.nda_version,
+            accepted_at=acceptance.accepted_at,
+        )
+
+    # ---- Share-link recipient NDA endpoints ----
+
+    @router.get("/view-sessions/{session_id}/nda", response_model=list[NdaStatusResponse])
+    async def get_share_nda(
+        session_id: str,
+        viewer_service: ViewerService = Depends(get_viewer_service),
+    ) -> list[NdaStatusResponse]:
+        try:
+            _resolved, applicable, outstanding = await viewer_service.nda_status(session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        outstanding_ids = {p.id for p in outstanding}
+        return [_build_nda_status(p, p.id not in outstanding_ids) for p in applicable]
+
+    @router.get("/view-sessions/{session_id}/nda/pdf")
+    async def get_share_nda_pdf(
+        session_id: str,
+        scope_type: str = Query(...),
+        scope_id: str = Query(...),
+        viewer_service: ViewerService = Depends(get_viewer_service),
+        nda_service: NdaService = Depends(get_nda_service),
+    ) -> StreamingResponse:
+        try:
+            resolved, applicable, _ = await viewer_service.nda_status(session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        policy = next(
+            (p for p in applicable if p.scope_type.value == scope_type and p.scope_id == scope_id),
+            None,
+        )
+        if policy is None:
+            raise HTTPException(status_code=404, detail="nda_not_found")
+        pdf = await nda_service.get_pdf_bytes(policy=policy)
+        return StreamingResponse(
+            iter([pdf]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": "inline; filename=nda.pdf", "Cache-Control": "private, no-store"},
+        )
+
+    @router.post("/view-sessions/{session_id}/nda/accept", response_model=NdaAcceptResponse)
+    async def accept_share_nda(
+        session_id: str,
+        payload: NdaAcceptRequest,
+        request: Request,
+        viewer_service: ViewerService = Depends(get_viewer_service),
+        nda_service: NdaService = Depends(get_nda_service),
+    ) -> NdaAcceptResponse:
+        try:
+            resolved, applicable, _ = await viewer_service.nda_status(session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        policy = next(
+            (p for p in applicable if p.scope_type.value == payload.scope_type and p.scope_id == payload.scope_id),
+            None,
+        )
+        if policy is None:
+            raise HTTPException(status_code=404, detail="nda_not_found")
+        subject = NdaService.subject_from_view_session(resolved)
+        try:
+            acceptance = await nda_service.accept(
+                policy=policy,
+                subject=subject,
+                typed_name=payload.typed_name,
+                scroll_confirmed=payload.scroll_confirmed,
+                checkbox_confirmed=payload.checkbox_confirmed,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except NdaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return NdaAcceptResponse(
+            accepted=True,
+            scope_type=acceptance.scope_type.value,
+            scope_id=acceptance.scope_id,
+            version=acceptance.nda_version,
+            accepted_at=acceptance.accepted_at,
+        )
+
+    # ---- Admin NDA management ----
+
+    async def _require_manage_document(document_service, principal, document_id):
+        try:
+            await document_service.require_document_access(
+                principal=principal, document_id=document_id, required=ResourceAction.MANAGE
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="document_not_found")
+
+    async def _require_manage_group(group_service, principal, group_id):
+        try:
+            await group_service.get_group(
+                principal=principal, group_id=group_id, required=ResourceAction.MANAGE
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="group_not_found")
+
+    async def _set_nda_text(nda_service, *, tenant_id, scope_type, scope_id, created_by, payload):
+        try:
+            policy = await nda_service.set_policy(
+                tenant_id=tenant_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                created_by=created_by,
+                content_type=NdaContentType.TEXT,
+                text_body=payload.text_body,
+                title=payload.title,
+                require_scroll=payload.require_scroll,
+                require_typed_signature=payload.require_typed_signature,
+            )
+        except NdaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return _admin_policy_view(policy)
+
+    async def _set_nda_pdf(nda_service, *, tenant_id, scope_type, scope_id, created_by, pdf, title, require_scroll, require_typed_signature):
+        content = await pdf.read()
+        try:
+            policy = await nda_service.set_policy(
+                tenant_id=tenant_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                created_by=created_by,
+                content_type=NdaContentType.PDF,
+                pdf_bytes=content,
+                title=title,
+                require_scroll=require_scroll,
+                require_typed_signature=require_typed_signature,
+            )
+        except NdaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return _admin_policy_view(policy)
+
+    def _acceptance_view(a) -> NdaAcceptanceRecordView:
+        return NdaAcceptanceRecordView(
+            id=a.id,
+            scope_type=a.scope_type.value,
+            scope_id=a.scope_id,
+            nda_version=a.nda_version,
+            subject_kind=a.subject_kind.value,
+            subject_id=a.subject_id,
+            presented_email=a.presented_email,
+            typed_name=a.typed_name,
+            scroll_confirmed=a.scroll_confirmed,
+            checkbox_confirmed=a.checkbox_confirmed,
+            accepted_at=a.accepted_at,
+        )
+
+    # Document-scoped NDA (admin)
+    @router.put("/documents/{document_id}/nda", response_model=NdaPolicyAdminView)
+    async def set_document_nda(
+        document_id: str,
+        payload: SetNdaTextRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> NdaPolicyAdminView:
+        await _require_manage_document(document_service, principal, document_id)
+        return await _set_nda_text(
+            nda_service, tenant_id=principal.tenant_id, scope_type=NdaScopeType.DOCUMENT,
+            scope_id=document_id, created_by=principal.user_id, payload=payload,
+        )
+
+    @router.post("/documents/{document_id}/nda/pdf", response_model=NdaPolicyAdminView)
+    async def set_document_nda_pdf(
+        document_id: str,
+        pdf: UploadFile = File(...),
+        title: Optional[str] = Form(default=None),
+        require_scroll: bool = Form(default=True),
+        require_typed_signature: bool = Form(default=True),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> NdaPolicyAdminView:
+        await _require_manage_document(document_service, principal, document_id)
+        return await _set_nda_pdf(
+            nda_service, tenant_id=principal.tenant_id, scope_type=NdaScopeType.DOCUMENT,
+            scope_id=document_id, created_by=principal.user_id, pdf=pdf, title=title,
+            require_scroll=require_scroll, require_typed_signature=require_typed_signature,
+        )
+
+    @router.get("/documents/{document_id}/nda", response_model=NdaPolicyAdminView | None)
+    async def get_document_nda(
+        document_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        document_service: DocumentService = Depends(get_document_service),
+    ):
+        await _require_manage_document(document_service, principal, document_id)
+        policy = await nda_service.get_policy(
+            tenant_id=principal.tenant_id, scope_type=NdaScopeType.DOCUMENT, scope_id=document_id
+        )
+        return _admin_policy_view(policy) if policy else None
+
+    @router.delete("/documents/{document_id}/nda", status_code=204, response_class=Response, response_model=None)
+    async def delete_document_nda(
+        document_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> None:
+        await _require_manage_document(document_service, principal, document_id)
+        await nda_service.remove_policy(
+            tenant_id=principal.tenant_id, scope_type=NdaScopeType.DOCUMENT, scope_id=document_id
+        )
+        return None
+
+    @router.get("/documents/{document_id}/nda/acceptances", response_model=list[NdaAcceptanceRecordView])
+    async def list_document_nda_acceptances(
+        document_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> list[NdaAcceptanceRecordView]:
+        await _require_manage_document(document_service, principal, document_id)
+        records = await nda_service.list_acceptances(
+            tenant_id=principal.tenant_id, scope_type=NdaScopeType.DOCUMENT, scope_id=document_id
+        )
+        return [_acceptance_view(a) for a in records]
+
+    # Room-scoped NDA (admin)
+    @router.put("/document-groups/{group_id}/nda", response_model=NdaPolicyAdminView)
+    async def set_group_nda(
+        group_id: str,
+        payload: SetNdaTextRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> NdaPolicyAdminView:
+        await _require_manage_group(group_service, principal, group_id)
+        return await _set_nda_text(
+            nda_service, tenant_id=principal.tenant_id, scope_type=NdaScopeType.ROOM,
+            scope_id=group_id, created_by=principal.user_id, payload=payload,
+        )
+
+    @router.post("/document-groups/{group_id}/nda/pdf", response_model=NdaPolicyAdminView)
+    async def set_group_nda_pdf(
+        group_id: str,
+        pdf: UploadFile = File(...),
+        title: Optional[str] = Form(default=None),
+        require_scroll: bool = Form(default=True),
+        require_typed_signature: bool = Form(default=True),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> NdaPolicyAdminView:
+        await _require_manage_group(group_service, principal, group_id)
+        return await _set_nda_pdf(
+            nda_service, tenant_id=principal.tenant_id, scope_type=NdaScopeType.ROOM,
+            scope_id=group_id, created_by=principal.user_id, pdf=pdf, title=title,
+            require_scroll=require_scroll, require_typed_signature=require_typed_signature,
+        )
+
+    @router.get("/document-groups/{group_id}/nda", response_model=NdaPolicyAdminView | None)
+    async def get_group_nda(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ):
+        await _require_manage_group(group_service, principal, group_id)
+        policy = await nda_service.get_policy(
+            tenant_id=principal.tenant_id, scope_type=NdaScopeType.ROOM, scope_id=group_id
+        )
+        return _admin_policy_view(policy) if policy else None
+
+    @router.delete("/document-groups/{group_id}/nda", status_code=204, response_class=Response, response_model=None)
+    async def delete_group_nda(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> None:
+        await _require_manage_group(group_service, principal, group_id)
+        await nda_service.remove_policy(
+            tenant_id=principal.tenant_id, scope_type=NdaScopeType.ROOM, scope_id=group_id
+        )
+        return None
+
+    @router.get("/document-groups/{group_id}/nda/acceptances", response_model=list[NdaAcceptanceRecordView])
+    async def list_group_nda_acceptances(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        nda_service: NdaService = Depends(get_nda_service),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> list[NdaAcceptanceRecordView]:
+        await _require_manage_group(group_service, principal, group_id)
+        records = await nda_service.list_acceptances(
+            tenant_id=principal.tenant_id, scope_type=NdaScopeType.ROOM, scope_id=group_id
+        )
+        return [_acceptance_view(a) for a in records]
+
+    # ---- Workspace dashboards (summary / activity / NDA compliance) ----
+
+    @router.get("/workspace/summary", response_model=WorkspaceSummaryResponse)
+    async def workspace_summary(
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        storage=Depends(get_storage),
+    ) -> WorkspaceSummaryResponse:
+        data = await storage.get_workspace_summary(tenant_id=principal.tenant_id)
+        return WorkspaceSummaryResponse(**data)
+
+    @router.get("/activity", response_model=list[ActivityItemResponse])
+    async def workspace_activity(
+        limit: int = Query(default=50, ge=1, le=200),
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        storage=Depends(get_storage),
+    ) -> list[ActivityItemResponse]:
+        tenant_id = principal.tenant_id
+        view_events = list(await storage.list_recent_view_events(tenant_id=tenant_id, limit=limit))
+        room_events = list(await storage.list_recent_external_room_events(tenant_id=tenant_id, limit=limit))
+
+        documents = list(await storage.list_documents(tenant_id=tenant_id))
+        doc_names = {d.id: d.name for d in documents}
+        room_ids = {e.room_id for e in room_events if e.room_id}
+        groups = (
+            list(await storage.list_document_groups_by_ids(tenant_id=tenant_id, group_ids=room_ids))
+            if room_ids
+            else []
+        )
+        room_names = {g.id: g.name for g in groups}
+        sessions = list(await storage.list_external_room_sessions(tenant_id=tenant_id))
+        session_email = {s.id: s.presented_email for s in sessions}
+
+        def _etype(value) -> str:
+            return value.value if hasattr(value, "value") else str(value)
+
+        items: list[ActivityItemResponse] = []
+        for event in view_events:
+            items.append(
+                ActivityItemResponse(
+                    timestamp=event.timestamp,
+                    source="share",
+                    event_type=_etype(event.event_type),
+                    document_id=event.document_id,
+                    document_name=doc_names.get(event.document_id),
+                    page_number=event.page_number,
+                    actor=None,
+                )
+            )
+        for event in room_events:
+            items.append(
+                ActivityItemResponse(
+                    timestamp=event.timestamp,
+                    source="room",
+                    event_type=_etype(event.event_type),
+                    document_id=event.document_id,
+                    document_name=doc_names.get(event.document_id) if event.document_id else None,
+                    room_id=event.room_id,
+                    room_name=room_names.get(event.room_id),
+                    page_number=event.page_number,
+                    actor=session_email.get(event.external_room_session_id),
+                )
+            )
+        items.sort(key=lambda item: item.timestamp, reverse=True)
+        return items[:limit]
+
+    @router.get("/nda/policies", response_model=list[NdaPolicySummaryResponse])
+    async def workspace_nda_policies(
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        storage=Depends(get_storage),
+    ) -> list[NdaPolicySummaryResponse]:
+        tenant_id = principal.tenant_id
+        policies = list(await storage.list_nda_policies(tenant_id=tenant_id))
+        documents = list(await storage.list_documents(tenant_id=tenant_id))
+        doc_names = {d.id: d.name for d in documents}
+        room_ids = {p.scope_id for p in policies if p.scope_type == NdaScopeType.ROOM}
+        groups = (
+            list(await storage.list_document_groups_by_ids(tenant_id=tenant_id, group_ids=room_ids))
+            if room_ids
+            else []
+        )
+        room_names = {g.id: g.name for g in groups}
+
+        out: list[NdaPolicySummaryResponse] = []
+        for policy in policies:
+            acceptances = list(
+                await storage.list_nda_acceptances(
+                    tenant_id=tenant_id, scope_type=policy.scope_type.value, scope_id=policy.scope_id
+                )
+            )
+            count = sum(1 for a in acceptances if a.nda_version == policy.version)
+            name = (
+                room_names.get(policy.scope_id)
+                if policy.scope_type == NdaScopeType.ROOM
+                else doc_names.get(policy.scope_id)
+            )
+            out.append(
+                NdaPolicySummaryResponse(
+                    scope_type=policy.scope_type.value,
+                    scope_id=policy.scope_id,
+                    scope_name=name,
+                    version=policy.version,
+                    title=policy.title,
+                    content_type=policy.content_type.value,
+                    require_scroll=policy.require_scroll,
+                    require_typed_signature=policy.require_typed_signature,
+                    acceptance_count=count,
+                    updated_at=policy.updated_at,
+                )
+            )
+        return out
 
     @router.get(
         "/external-room/current/documents/{document_id}/download",

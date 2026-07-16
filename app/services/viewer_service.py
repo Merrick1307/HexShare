@@ -23,6 +23,7 @@ from app.services.document_processor import (
 )
 from app.services.document_service import DocumentService
 from app.services.link_service import LinkService
+from app.services.nda_service import NdaService
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class ViewerService:
         document_processor: DocumentProcessor,
         document_service: DocumentService,
         link_service: LinkService,
+        nda_service: NdaService | None = None,
     ) -> None:
         self._storage = storage
         self._object_storage = object_storage
@@ -97,6 +99,7 @@ class ViewerService:
         self._document_processor = document_processor
         self._document_service = document_service
         self._link_service = link_service
+        self._nda_service = nda_service
         self._content_cache = _BytesCache(maxsize=50, ttl_seconds=300.0)
 
     @staticmethod
@@ -305,6 +308,37 @@ class ViewerService:
             raise ValueError("expired")
         return resolved
 
+    async def nda_status(self, *, session_id: str):
+        """Applicable + outstanding NDA policies for a share-link session's document.
+
+        Does not enforce (so the frontend can render the gate). Returns
+        ``(resolved, applicable, outstanding)``; applicable/outstanding are empty
+        when NDA is disabled.
+        """
+        resolved = await self.resolve_view_session(session_id=session_id)
+        if self._nda_service is None:
+            return resolved, [], []
+        document = await self._document_service.get_document(
+            tenant_id=resolved.session.tenant_id, document_id=resolved.document_id
+        )
+        if document is None:
+            return resolved, [], []
+        subject = NdaService.subject_from_view_session(resolved)
+        applicable = await self._nda_service.applicable_policies(document=document)
+        outstanding = await self._nda_service.outstanding_policies(document=document, subject=subject)
+        return resolved, applicable, outstanding
+
+    async def _enforce_nda(self, *, resolved: ResolvedViewSession) -> None:
+        if self._nda_service is None:
+            return
+        document = await self._document_service.get_document(
+            tenant_id=resolved.session.tenant_id, document_id=resolved.document_id
+        )
+        if document is None:
+            return
+        subject = NdaService.subject_from_view_session(resolved)
+        await self._nda_service.require_all_accepted(document=document, subject=subject)
+
     async def record_page_view(
         self,
         *,
@@ -430,6 +464,7 @@ class ViewerService:
         )
         if view_policy.view_kind == "pdf":
             raise DocumentProcessingError("page_image_view_required")
+        await self._enforce_nda(resolved=active)
         return await self._process_document(
             resolved=active,
             session_id=session_id,
@@ -455,6 +490,7 @@ class ViewerService:
         if view_policy.view_kind != "pdf":
             raise DocumentProcessingError("page_image_view_not_supported")
 
+        await self._enforce_nda(resolved=active)
         cache_key = self._build_rendered_page_cache_key(
             resolved=active,
             page_number=page_number,
@@ -481,6 +517,7 @@ class ViewerService:
 
     async def download_document(self, *, tenant_id: str, session_id: str) -> ProcessedDocument:
         resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
+        await self._enforce_nda(resolved=resolved)
         return await self._process_document(
             resolved=resolved,
             session_id=session_id,

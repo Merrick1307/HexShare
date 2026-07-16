@@ -38,6 +38,7 @@ from app.services import (
     ExternalRoomAccessService,
     ExternalRoomViewerService,
     LinkService,
+    NdaService,
     UploadService,
     ViewerService,
 )
@@ -120,6 +121,7 @@ async def lifespan(fastapi_app: FastAPI):
     document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
     external_room_access_service = ExternalRoomAccessService(storage=persistence_layer)
+    nda_service = NdaService(storage=persistence_layer, object_storage=object_storage)
     document_processor = DocumentProcessor()
     max_upload = os.getenv("HEXSHARE_MAX_UPLOAD_SIZE_BYTES")
     upload_service = UploadService(
@@ -136,6 +138,7 @@ async def lifespan(fastapi_app: FastAPI):
         document_processor=document_processor,
         document_service=document_service,
         link_service=link_service,
+        nda_service=nda_service,
     )
     external_room_viewer_service = ExternalRoomViewerService(
         storage=persistence_layer,
@@ -143,6 +146,7 @@ async def lifespan(fastapi_app: FastAPI):
         rendered_page_cache=rendered_page_cache,
         document_processor=document_processor,
         document_service=document_service,
+        nda_service=nda_service,
     )
 
     fastapi_app.state.pool = dp_pool
@@ -163,6 +167,7 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.external_room_access_service = external_room_access_service
     fastapi_app.state.external_room_viewer_service = external_room_viewer_service
     fastapi_app.state.viewer_service = viewer_service
+    fastapi_app.state.nda_service = nda_service
     fastapi_app.state.analytics_service = AnalyticsService(persistence_layer)
     fastapi_app.state.access_control = access_control
     fastapi_app.state.tenant_auth = TenantAuthDependency(authenticator=authenticator)
@@ -195,7 +200,15 @@ async def lifespan(fastapi_app: FastAPI):
 
 
 def create_app(*args, **kwargs) -> FastAPI:
+    from fastapi.responses import JSONResponse
+
+    from app.services import NdaAcceptanceRequired
+
     app = FastAPI(title="HexShare", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(NdaAcceptanceRequired)
+    async def _nda_required_handler(_request, exc: NdaAcceptanceRequired):
+        return JSONResponse(status_code=403, content={"detail": exc.detail})
 
     app.include_router(api_router(), prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")

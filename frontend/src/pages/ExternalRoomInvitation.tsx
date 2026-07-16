@@ -3,12 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ArrowLeft, Copy, Download, Eye, FolderOpen, LogOut, Mail, Shield } from 'lucide-react';
 import { api } from '../services/api';
-import { Document, ExternalRoomContext, ExternalRoomInviteInspection } from '../types';
+import { Document, ExternalRoomContext, ExternalRoomInviteInspection, NdaStatus } from '../types';
 import { formatBytes } from '../lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { NdaGate } from '../components/NdaGate';
 
 export function ExternalRoomInvitation() {
   const { token } = useParams<{ token: string }>();
@@ -22,14 +23,17 @@ export function ExternalRoomInvitation() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
+  const [docNda, setDocNda] = useState<{ documentId: string; status: NdaStatus } | null>(null);
 
   const loadSessionData = useCallback(async (): Promise<ExternalRoomContext> => {
-    const [nextContext, nextDocuments] = await Promise.all([
-      api.getExternalRoomContext(),
-      api.listExternalRoomDocuments(),
-    ]);
+    const nextContext = await api.getExternalRoomContext();
     setContext(nextContext);
-    setDocuments(nextDocuments);
+    // The room-level NDA blocks the document list until accepted.
+    if (nextContext.nda?.required && !nextContext.nda.accepted) {
+      setDocuments([]);
+    } else {
+      setDocuments(await api.listExternalRoomDocuments());
+    }
     return nextContext;
   }, []);
 
@@ -99,14 +103,54 @@ export function ExternalRoomInvitation() {
     }
   }
 
+  async function handleAcceptRoomNda(payload: { typed_name: string; scroll_confirmed: boolean; checkbox_confirmed: boolean }) {
+    const policy = context?.nda?.policy;
+    if (!policy) return;
+    await api.acceptExternalRoomNda({
+      scope_type: policy.scope_type,
+      scope_id: policy.scope_id,
+      ...payload,
+    });
+    await loadSessionData();
+    setInfo('NDA accepted. The room is now unlocked.');
+  }
+
   async function handleOpenViewer(documentId: string) {
     setError(null);
     try {
       const session = await api.createExternalRoomDocumentSession(documentId);
       navigate(`/external-room/viewer/${encodeURIComponent(session.session_id)}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open protected viewer');
+      const message = err instanceof Error ? err.message : 'Failed to open protected viewer';
+      if (message.includes('nda_acceptance_required')) {
+        // The document itself carries an NDA — present it before opening.
+        try {
+          const statuses = await api.getExternalRoomNda(documentId);
+          const outstanding = statuses.find(
+            (s) => s.required && !s.accepted && s.policy?.scope_type === 'document',
+          );
+          if (outstanding) {
+            setDocNda({ documentId, status: outstanding });
+            return;
+          }
+        } catch {
+          /* fall through to generic error */
+        }
+      }
+      setError(message);
     }
+  }
+
+  async function handleAcceptDocNda(payload: { typed_name: string; scroll_confirmed: boolean; checkbox_confirmed: boolean }) {
+    if (!docNda?.status.policy) return;
+    await api.acceptExternalRoomNda({
+      scope_type: docNda.status.policy.scope_type,
+      scope_id: docNda.status.policy.scope_id,
+      ...payload,
+    });
+    const documentId = docNda.documentId;
+    setDocNda(null);
+    await handleOpenViewer(documentId);
   }
 
   async function handleLogout() {
@@ -270,6 +314,19 @@ export function ExternalRoomInvitation() {
               </Card>
             </div>
 
+            {context.nda?.required && !context.nda.accepted ? (
+              <NdaGate
+                status={context.nda}
+                pdfUrl={
+                  context.nda.policy?.content_type === 'pdf'
+                    ? api.toAbsoluteApiUrl(
+                        api.externalRoomNdaPdfUrl(context.nda.policy.scope_type, context.nda.policy.scope_id),
+                      )
+                    : null
+                }
+                onAccept={handleAcceptRoomNda}
+              />
+            ) : (
             <Card>
               <CardHeader>
                 <CardTitle>Room documents</CardTitle>
@@ -315,9 +372,33 @@ export function ExternalRoomInvitation() {
                 )}
               </CardContent>
             </Card>
+            )}
           </div>
         )}
       </div>
+
+      {docNda ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-zinc-900/60 p-4 py-10">
+          <div className="w-full max-w-3xl">
+            <div className="mb-3 flex justify-end">
+              <Button variant="outline" size="sm" onClick={() => setDocNda(null)}>
+                Cancel
+              </Button>
+            </div>
+            <NdaGate
+              status={docNda.status}
+              pdfUrl={
+                docNda.status.policy?.content_type === 'pdf'
+                  ? api.toAbsoluteApiUrl(
+                      api.externalRoomNdaPdfUrl(docNda.status.policy.scope_type, docNda.status.policy.scope_id),
+                    )
+                  : null
+              }
+              onAccept={handleAcceptDocNda}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

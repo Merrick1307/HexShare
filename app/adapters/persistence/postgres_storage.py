@@ -24,6 +24,11 @@ from app.domain import (
     ExternalRoomEvent,
     ExternalRoomEventType,
     ExternalRoomSession,
+    NdaAcceptance,
+    NdaContentType,
+    NdaPolicy,
+    NdaScopeType,
+    NdaSubjectKind,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -1003,6 +1008,274 @@ class PostgresStorage(StoragePort):
         """
         async with self._pool.acquire() as con:
             await con.execute(sql, tenant_id, event_id, duration_ms)
+
+    # -- NDA policies & acceptances -------------------------------------------------
+
+    @staticmethod
+    def _row_to_nda_policy(row) -> Optional[NdaPolicy]:
+        if not row:
+            return None
+        return NdaPolicy(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            scope_type=NdaScopeType(row["scope_type"]),
+            scope_id=row["scope_id"],
+            version=row["version"],
+            title=row["title"],
+            content_type=NdaContentType(row["content_type"]),
+            text_body=row["text_body"],
+            text_storage_key=row["text_storage_key"],
+            pdf_storage_key=row["pdf_storage_key"],
+            require_scroll=row["require_scroll"],
+            require_typed_signature=row["require_typed_signature"],
+            active=row["active"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_nda_acceptance(row) -> Optional[NdaAcceptance]:
+        if not row:
+            return None
+        return NdaAcceptance(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            nda_policy_id=row["nda_policy_id"],
+            scope_type=NdaScopeType(row["scope_type"]),
+            scope_id=row["scope_id"],
+            nda_version=row["nda_version"],
+            subject_kind=NdaSubjectKind(row["subject_kind"]),
+            subject_id=row["subject_id"],
+            external_party_id=row["external_party_id"],
+            presented_email=row["presented_email"],
+            typed_name=row["typed_name"],
+            scroll_confirmed=row["scroll_confirmed"],
+            checkbox_confirmed=row["checkbox_confirmed"],
+            session_id=row["session_id"],
+            ip_hash=row["ip_hash"],
+            ua_hash=row["ua_hash"],
+            accepted_at=row["accepted_at"],
+        )
+
+    async def save_nda_policy(self, policy: NdaPolicy) -> None:
+        sql = """
+        INSERT INTO nda_policies (
+            id, tenant_id, scope_type, scope_id, version, title, content_type,
+            text_body, text_storage_key, pdf_storage_key, require_scroll,
+            require_typed_signature, active, created_by, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ON CONFLICT (tenant_id, scope_type, scope_id) DO UPDATE SET
+            version = EXCLUDED.version,
+            title = EXCLUDED.title,
+            content_type = EXCLUDED.content_type,
+            text_body = EXCLUDED.text_body,
+            text_storage_key = EXCLUDED.text_storage_key,
+            pdf_storage_key = EXCLUDED.pdf_storage_key,
+            require_scroll = EXCLUDED.require_scroll,
+            require_typed_signature = EXCLUDED.require_typed_signature,
+            active = EXCLUDED.active,
+            updated_at = EXCLUDED.updated_at
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(
+                sql,
+                policy.id,
+                policy.tenant_id,
+                policy.scope_type.value,
+                policy.scope_id,
+                policy.version,
+                policy.title,
+                policy.content_type.value,
+                policy.text_body,
+                policy.text_storage_key,
+                policy.pdf_storage_key,
+                policy.require_scroll,
+                policy.require_typed_signature,
+                policy.active,
+                policy.created_by,
+                policy.created_at,
+                policy.updated_at,
+            )
+
+    async def get_nda_policy(
+        self, *, tenant_id: str, scope_type: str, scope_id: str, active_only: bool = True
+    ) -> Optional[NdaPolicy]:
+        sql = """
+        SELECT * FROM nda_policies
+        WHERE tenant_id = $1 AND scope_type = $2 AND scope_id = $3
+        """
+        if active_only:
+            sql += " AND active = TRUE"
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id, scope_type, scope_id)
+        return self._row_to_nda_policy(row)
+
+    async def deactivate_nda_policy(
+        self, *, tenant_id: str, scope_type: str, scope_id: str
+    ) -> None:
+        sql = """
+        UPDATE nda_policies SET active = FALSE, updated_at = NOW()
+        WHERE tenant_id = $1 AND scope_type = $2 AND scope_id = $3
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(sql, tenant_id, scope_type, scope_id)
+
+    async def save_nda_acceptance(self, acceptance: NdaAcceptance) -> None:
+        sql = """
+        INSERT INTO nda_acceptances (
+            id, tenant_id, nda_policy_id, scope_type, scope_id, nda_version,
+            subject_kind, subject_id, external_party_id, presented_email, typed_name,
+            scroll_confirmed, checkbox_confirmed, session_id, ip_hash, ua_hash, accepted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        """
+        async with self._pool.acquire() as con:
+            await con.execute(
+                sql,
+                acceptance.id,
+                acceptance.tenant_id,
+                acceptance.nda_policy_id,
+                acceptance.scope_type.value,
+                acceptance.scope_id,
+                acceptance.nda_version,
+                acceptance.subject_kind.value,
+                acceptance.subject_id,
+                acceptance.external_party_id,
+                acceptance.presented_email,
+                acceptance.typed_name,
+                acceptance.scroll_confirmed,
+                acceptance.checkbox_confirmed,
+                acceptance.session_id,
+                acceptance.ip_hash,
+                acceptance.ua_hash,
+                acceptance.accepted_at,
+            )
+
+    async def get_nda_acceptance(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_id: str,
+        nda_version: int,
+        subject_kind: str,
+        subject_id: str,
+    ) -> Optional[NdaAcceptance]:
+        sql = """
+        SELECT * FROM nda_acceptances
+        WHERE tenant_id = $1 AND scope_type = $2 AND scope_id = $3
+          AND nda_version = $4 AND subject_kind = $5 AND subject_id = $6
+        ORDER BY accepted_at DESC
+        LIMIT 1
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(
+                sql, tenant_id, scope_type, scope_id, nda_version, subject_kind, subject_id
+            )
+        return self._row_to_nda_acceptance(row)
+
+    async def list_nda_acceptances(
+        self, *, tenant_id: str, scope_type: str, scope_id: str
+    ) -> Iterable[NdaAcceptance]:
+        sql = """
+        SELECT * FROM nda_acceptances
+        WHERE tenant_id = $1 AND scope_type = $2 AND scope_id = $3
+        ORDER BY accepted_at DESC
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, scope_type, scope_id)
+        return [self._row_to_nda_acceptance(row) for row in rows if row]
+
+    async def list_nda_policies(
+        self, *, tenant_id: str, active_only: bool = True
+    ) -> Iterable[NdaPolicy]:
+        sql = "SELECT * FROM nda_policies WHERE tenant_id = $1"
+        if active_only:
+            sql += " AND active = TRUE"
+        sql += " ORDER BY updated_at DESC"
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id)
+        return [self._row_to_nda_policy(row) for row in rows if row]
+
+    async def get_workspace_summary(self, *, tenant_id: str) -> dict:
+        sql = """
+        SELECT
+            (SELECT COUNT(*) FROM documents WHERE tenant_id = $1) AS documents,
+            (SELECT COUNT(*) FROM document_groups WHERE tenant_id = $1) AS groups,
+            (SELECT COUNT(*) FROM share_links
+                WHERE tenant_id = $1 AND revoked_at IS NULL AND expires_at > NOW()) AS active_links,
+            (SELECT COUNT(*) FROM external_parties
+                WHERE tenant_id = $1 AND status = 'active') AS external_recipients,
+            (SELECT COUNT(*) FROM view_events
+                WHERE tenant_id = $1 AND event_type = 'open')
+            + (SELECT COUNT(*) FROM external_room_events
+                WHERE tenant_id = $1 AND event_type = 'document_view_open') AS document_opens
+        """
+        async with self._pool.acquire() as con:
+            row = await con.fetchrow(sql, tenant_id)
+        return {
+            "documents": int(row["documents"] or 0),
+            "groups": int(row["groups"] or 0),
+            "active_links": int(row["active_links"] or 0),
+            "external_recipients": int(row["external_recipients"] or 0),
+            "document_opens": int(row["document_opens"] or 0),
+        }
+
+    async def list_recent_view_events(
+        self, *, tenant_id: str, limit: int = 100
+    ) -> Iterable[ViewEvent]:
+        sql = """
+        SELECT id, tenant_id, document_id, share_link_id, visitor_session_id,
+               event_type, page_number, duration_ms, timestamp
+        FROM view_events
+        WHERE tenant_id = $1
+        ORDER BY timestamp DESC
+        LIMIT $2
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, limit)
+        return [
+            ViewEvent(
+                id=row["id"],
+                tenant_id=row["tenant_id"],
+                document_id=row["document_id"],
+                share_link_id=row["share_link_id"],
+                visitor_session_id=row["visitor_session_id"],
+                event_type=row["event_type"],
+                page_number=row["page_number"],
+                duration_ms=row["duration_ms"],
+                timestamp=row["timestamp"],
+            )
+            for row in rows
+        ]
+
+    async def list_recent_external_room_events(
+        self, *, tenant_id: str, limit: int = 100
+    ) -> Iterable[ExternalRoomEvent]:
+        sql = """
+        SELECT id, tenant_id, external_room_session_id, room_id, event_type,
+               document_id, page_number, duration_ms, timestamp
+        FROM external_room_events
+        WHERE tenant_id = $1
+        ORDER BY timestamp DESC
+        LIMIT $2
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tenant_id, limit)
+        return [
+            ExternalRoomEvent(
+                id=row["id"],
+                tenant_id=row["tenant_id"],
+                external_room_session_id=row["external_room_session_id"],
+                room_id=row["room_id"],
+                event_type=row["event_type"],
+                document_id=row["document_id"],
+                page_number=row["page_number"],
+                duration_ms=row["duration_ms"],
+                timestamp=row["timestamp"],
+            )
+            for row in rows
+        ]
 
 
 @StorageFactory.register("postgres")

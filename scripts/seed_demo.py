@@ -23,10 +23,10 @@ import asyncpg
 from app.adapters import JWTTokenAdapter, NoopEventBus
 from app.auth.tenant_auth import TenantPrincipal
 from app.core.authz import ResourceAction
-from app.domain import DocumentGroup
+from app.domain import DocumentGroup, NdaContentType, NdaScopeType
 from app.infra.factories import ObjectStorageFactory, StorageFactory
 from app.ports.object_storage_port import ObjectWriteRequest
-from app.services import DocumentService, ExternalRoomAccessService, LinkService
+from app.services import DocumentService, ExternalRoomAccessService, LinkService, NdaService
 
 TENANT = os.getenv("HEXSHARE_LOCAL_TENANT_ID", "local")
 DEMO_USER = "demo-user"
@@ -38,6 +38,23 @@ SHARE_LINK_TTL_SECONDS = 365 * 24 * 60 * 60
 OUTPUT_PATH = os.getenv("HEXSHARE_DEMO_LINKS_PATH", "/seed-output/demo-links.txt")
 
 SHARE_DOC_ID = "doc_demo_share"
+
+DEMO_NDA_TITLE = "Project Atlas — Mutual Non-Disclosure Agreement"
+DEMO_NDA_TEXT = (
+    "MUTUAL NON-DISCLOSURE AGREEMENT\n\n"
+    "This is a sample NDA presented by HexShare's NDA gate. In a real data room, "
+    "a recipient must read this agreement to the end, type their name as a signature, "
+    "and confirm acceptance before any document in the room can be opened.\n\n"
+    "1. Confidential Information. All materials made available in this room are "
+    "confidential and provided solely to evaluate a potential transaction.\n\n"
+    "2. Non-Disclosure. The recipient agrees not to disclose or reproduce any "
+    "confidential information without prior written consent.\n\n"
+    "3. Attribution. The recipient understands that every page viewed is watermarked "
+    "with their identity and that all access is audited.\n\n"
+    "4. Acceptance. Typing your name below and confirming constitutes acceptance of "
+    "this agreement, recorded with your identity, timestamp, and NDA version.\n\n"
+    "(Replace this placeholder with your own NDA text once you self-host.)"
+)
 
 _FULL_BITMASK = int(
     ResourceAction.READ
@@ -192,6 +209,31 @@ async def _seed_documents_and_room(*, storage, object_storage, document_service)
         room_id=None,
     )
 
+    # A few more ungrouped documents so the dashboard is populated.
+    extra_docs = [
+        ("doc_demo_deck", "Pitch Deck.pdf", "Acme Corp — Pitch Deck",
+         "Company vision, market size, product, traction, and the ask. A sample "
+         "deck so the dashboard shows a realistic document set."),
+        ("doc_demo_cap", "Cap Table.pdf", "Acme Corp — Capitalization Table",
+         "Founders, option pool, and investor ownership across rounds. Sample figures only."),
+        ("doc_demo_metrics", "Key Metrics.pdf", "Acme Corp — Key Metrics",
+         "ARR, growth rate, gross margin, CAC and payback. Placeholder numbers for the demo."),
+        ("doc_demo_legal", "Incorporation Docs.pdf", "Acme Corp — Incorporation",
+         "Certificate of incorporation and bylaws (sample). Replace with your own once you self-host."),
+        ("doc_demo_notes", "Board Notes.pdf", "Acme Corp — Board Meeting Notes",
+         "Summary of the last board meeting: hiring plan, runway, and next milestones."),
+    ]
+    for doc_id, name, title, body in extra_docs:
+        await _create_document(
+            storage=storage,
+            object_storage=object_storage,
+            document_service=document_service,
+            document_id=doc_id,
+            name=name,
+            pdf_bytes=_make_pdf(title=title, body=body, pages=1),
+            room_id=None,
+        )
+
     # The due-diligence room (document group).
     if await storage.get_document_group(tenant_id=TENANT, group_id=GROUP_ID) is None:
         from datetime import datetime
@@ -310,6 +352,7 @@ async def main() -> None:
         document_service = DocumentService(storage, event_bus)
         link_service = LinkService(storage, token_adapter, event_bus)
         external = ExternalRoomAccessService(storage=storage)
+        nda_service = NdaService(storage=storage, object_storage=object_storage)
 
         await _upsert_local_user(pool)
         await _seed_documents_and_room(
@@ -318,6 +361,19 @@ async def main() -> None:
             document_service=document_service,
         )
         await _upsert_group_membership(pool)
+
+        # Gate the demo room with a sample NDA so the acceptance flow is visible.
+        await nda_service.set_policy(
+            tenant_id=TENANT,
+            scope_type=NdaScopeType.ROOM,
+            scope_id=GROUP_ID,
+            created_by=DEMO_USER,
+            content_type=NdaContentType.TEXT,
+            text_body=DEMO_NDA_TEXT,
+            title=DEMO_NDA_TITLE,
+            require_scroll=True,
+            require_typed_signature=True,
+        )
 
         share_url = await _ensure_share_link(storage=storage, link_service=link_service)
 

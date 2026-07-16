@@ -521,6 +521,19 @@ class ExternalRoomAccessService:
             )
         )
 
+    async def record_nda_accepted(self, *, principal: ExternalRoomPrincipal, document_id: str | None = None) -> None:
+        await self._storage.save_external_room_event(
+            ExternalRoomEvent(
+                id=self._storage.generate_id("ere"),
+                tenant_id=principal.tenant_id,
+                external_room_session_id=principal.session_id,
+                room_id=principal.room_id,
+                event_type=ExternalRoomEventType.NDA_ACCEPTED,
+                document_id=document_id,
+                timestamp=self._now(),
+            )
+        )
+
     async def record_document_download(self, *, principal: ExternalRoomPrincipal, document_id: str) -> None:
         await self._storage.save_external_room_event(
             ExternalRoomEvent(

@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.nda import NdaStatusResponse
+
 
 class ProvisionExternalRoomAccessResponse(BaseModel):
     external_party_id: str
@@ -64,6 +66,7 @@ class ExternalRoomContextResponse(BaseModel):
     email: str
     can_download: bool = False
     can_print: bool = False
+    nda: NdaStatusResponse | None = None
 
 
 class ExternalRoomDocumentSessionResponse(BaseModel):

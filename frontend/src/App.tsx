@@ -14,6 +14,8 @@ import { ExternalRoomInvitation } from './pages/ExternalRoomInvitation';
 import { ExternalRoomViewer } from './pages/ExternalRoomViewer';
 import { Groups } from './pages/Groups';
 import { GroupDetails } from './pages/GroupDetails';
+import { Activity } from './pages/Activity';
+import { Ndas } from './pages/Ndas';
 import { ViewDocument } from './pages/ViewDocument';
 import { NotFound } from './pages/NotFound';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -36,6 +38,8 @@ export default function App() {
           <Route path="/documents/:id" element={<DocumentDetails />} />
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<GroupDetails />} />
+          <Route path="/activity" element={<Activity />} />
+          <Route path="/ndas" element={<Ndas />} />
         </Route>
         
         <Route path="*" element={<NotFound />} />

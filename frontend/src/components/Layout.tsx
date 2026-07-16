@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { FileText, Folder, LogOut } from 'lucide-react';
+import { Activity, FileText, Folder, LogOut, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { HexLogo } from './ui/HexLogo';
 
@@ -9,6 +9,8 @@ export function Layout() {
   const navItems = [
     { icon: FileText, label: 'Documents', path: '/dashboard' },
     { icon: Folder, label: 'Groups', path: '/groups' },
+    { icon: Activity, label: 'Activity', path: '/activity' },
+    { icon: ShieldCheck, label: 'NDAs', path: '/ndas' },
   ];
 
   return (

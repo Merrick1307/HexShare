@@ -25,6 +25,14 @@ def get_viewer_service(request: Request):
     return request.app.state.viewer_service
 
 
+def get_nda_service(request: Request):
+    return request.app.state.nda_service
+
+
+def get_storage(request: Request):
+    return request.app.state.storage
+
+
 def get_external_room_access_service(request: Request):
     return request.app.state.external_room_access_service
 

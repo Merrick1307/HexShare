@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { MoreHorizontal, Search, Upload, FileText, Link2, Eye, FolderInput, Trash2 } from 'lucide-react';
@@ -9,6 +10,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { WorkspaceStats } from '../components/WorkspaceStats';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 
 function DocumentRowMenu({
@@ -26,57 +28,80 @@ function DocumentRowMenu({
   onMoveToGroup: (document: Document) => void;
   onDelete: (document: Document) => void;
 }) {
-  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuContentRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setPos(null);
+      return;
+    }
+    const update = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (rect) setPos({ top: rect.bottom + 8, left: rect.right - 192 }); // 192px = w-48
+    };
+    update();
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onToggle();
-      }
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || menuContentRef.current?.contains(target)) return;
+      onToggle();
     }
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
   }, [isOpen, onToggle]);
 
   return (
-    <div ref={menuRef} className="relative inline-block text-left">
-      <Button type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={onToggle}>
+    <div className="relative inline-block text-left">
+      <Button ref={buttonRef} type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={onToggle}>
         <MoreHorizontal className="h-4 w-4" />
       </Button>
-      {isOpen ? (
-        <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-zinc-200 bg-white p-1 shadow-xl">
-          <Link to={`/documents/${doc.id}`} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50">
-            <Eye className="h-4 w-4" />
-            View details
-          </Link>
-          <button
-            type="button"
-            onClick={() => onCreateLink(doc)}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
-          >
-            <Link2 className="h-4 w-4" />
-            Create link
-          </button>
-          <button
-            type="button"
-            onClick={() => onMoveToGroup(doc)}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
-          >
-            <FolderInput className="h-4 w-4" />
-            Move to group
-          </button>
-          <div className="my-1 border-t border-zinc-100" />
-          <button
-            type="button"
-            onClick={() => onDelete(doc)}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </button>
-        </div>
-      ) : null}
+      {isOpen && pos
+        ? createPortal(
+            <div
+              ref={menuContentRef}
+              style={{ position: 'fixed', top: pos.top, left: pos.left }}
+              className="z-50 w-48 rounded-xl border border-zinc-200 bg-white p-1 shadow-xl"
+            >
+              <Link to={`/documents/${doc.id}`} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50">
+                <Eye className="h-4 w-4" />
+                View details
+              </Link>
+              <button
+                type="button"
+                onClick={() => onCreateLink(doc)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
+              >
+                <Link2 className="h-4 w-4" />
+                Create link
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoveToGroup(doc)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
+              >
+                <FolderInput className="h-4 w-4" />
+                Move to group
+              </button>
+              <div className="my-1 border-t border-zinc-100" />
+              <button
+                type="button"
+                onClick={() => onDelete(doc)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -335,6 +360,8 @@ export function Dashboard() {
 
       {successMessage ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div> : null}
       {actionError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</div> : null}
+
+      <WorkspaceStats />
 
       <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
         <div className="relative max-w-md">

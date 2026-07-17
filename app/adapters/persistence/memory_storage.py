@@ -460,6 +460,37 @@ class MemoryStorage(StoragePort):
             policies = [p for p in policies if p.active]
         return sorted(policies, key=lambda p: p.updated_at, reverse=True)
 
+    async def list_rate_limit_policies(self, *, tier: str) -> Iterable[dict]:
+        defaults = {
+            "free": {
+                "api_general": (100, 3600),
+                "document_upload": (5, 3600),
+                "share_link": (10, 3600),
+                "nda_create": (3, 3600),
+            },
+            "pro": {
+                "api_general": (1000, 3600),
+                "document_upload": (100, 3600),
+                "share_link": (500, 3600),
+                "nda_create": (50, 3600),
+            },
+            "enterprise": {
+                "api_general": (1000000, 3600),
+                "document_upload": (1000000, 3600),
+                "share_link": (1000000, 3600),
+                "nda_create": (1000000, 3600),
+            },
+        }
+        policies = defaults.get(tier, defaults["free"])
+        return [
+            {
+                "policy_name": policy_name,
+                "limit_count": limit_count,
+                "window_seconds": window_seconds,
+            }
+            for policy_name, (limit_count, window_seconds) in policies.items()
+        ]
+
     async def get_workspace_summary(self, *, tenant_id: str) -> dict:
         now = datetime.utcnow()
         active_links = [

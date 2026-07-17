@@ -1,0 +1,6 @@
+A new NDA has been created by {{ created_by }}.
+
+NDA ID: {{ nda_id }}
+Title: {{ title }}
+
+Please review and take any necessary action.

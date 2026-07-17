@@ -1,0 +1,14 @@
+Hello {{ recipient_name }},
+
+{{ shared_by_name }} has shared the document "{{ document_name }}" with you.
+
+{% if message %}
+Message from {{ shared_by_name }}:
+{{ message }}
+
+{% endif %}
+View it here: {{ access_link }}
+
+{% if expires_at %}
+Link expires: {{ expires_at }}
+{% endif %}

@@ -22,6 +22,7 @@ from app.domain import (
     ExternalRoomSession,
 )
 from app.ports.storage_port import StoragePort
+from app.ports import EventBusPort
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class ExternalRoomAccessService:
         self,
         *,
         storage: StoragePort,
+        event_bus: EventBusPort | None = None,
         jwt_secret: str | None = None,
         issuer: str | None = None,
         audience: str | None = None,
@@ -77,6 +79,7 @@ class ExternalRoomAccessService:
         invite_ttl_seconds: int | None = None,
     ) -> None:
         self._storage = storage
+        self._event_bus = event_bus
         self._jwt_secret = jwt_secret or os.getenv("HEXSHARE_JWT_SECRET")
         if not self._jwt_secret:
             raise RuntimeError("Missing HEXSHARE_JWT_SECRET for external room access service")
@@ -257,6 +260,27 @@ class ExternalRoomAccessService:
             },
             expires_at=invite_expires_at,
         )
+        
+        # Emit external_room.invited event for email notification
+        if self._event_bus:
+            group = await self._storage.get_document_group(tenant_id=principal.tenant_id, group_id=room_id)
+            await self._event_bus.publish_event(
+                principal.tenant_id,
+                "external_room.invited",
+                {
+                    "recipient_email": email_record.email_normalized,
+                    "recipient_name": recipient_display_name or party.display_name or "User",
+                    "room_id": room_id,
+                    "room_name": group.name if group else "External Room",
+                    "invited_by": principal.user_id,
+                    "invited_by_name": "A colleague",  # TODO: Get actual user name
+                    "invite_link": f"/external-room/invitations/{invite_token}",
+                    "invite_expires_at": invite_expires_at.isoformat(),
+                    "can_download": can_download,
+                    "can_print": can_print,
+                },
+            )
+        
         return ProvisionedRoomAccess(
             party=party,
             grant=grant,

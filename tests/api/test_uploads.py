@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.api.uploads import complete_upload, get_document_download_url, initiate_upload
+from app.api.routes.uploads import complete_upload, get_document_download_url, initiate_upload
 from app.auth.tenant_auth import TenantPrincipal
 from app.core.authz import ResourceAction
 from app.domain import Document

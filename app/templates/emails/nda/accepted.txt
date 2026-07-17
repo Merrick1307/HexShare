@@ -1,0 +1,7 @@
+Hello {{ recipient_name }},
+
+Thank you for accepting the NDA '{{ title }}'.
+
+Acceptance confirmed at: {{ accepted_at }}
+
+You now have access to protected resources.

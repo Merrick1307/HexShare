@@ -1,0 +1,22 @@
+You're Invited!
+
+Hi {{ recipient_name }},
+
+{{ invited_by_name }} has invited you to join the "{{ room_name }}" external room on HexShare.
+
+{% if can_download or can_print %}
+Your permissions:
+{% if can_download %}- Download documents{% endif %}
+{% if can_print %}- Print documents{% endif %}
+{% endif %}
+
+To access the room, visit: {{ invite_link }}
+
+{% if invite_expires_at %}
+This invitation expires on {{ invite_expires_at }}.
+{% endif %}
+
+If you have any questions, please contact {{ invited_by_name }}.
+
+---
+This is an automated message from HexShare. Please do not reply to this email.

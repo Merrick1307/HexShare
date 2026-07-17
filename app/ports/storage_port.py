@@ -353,6 +353,12 @@ class StoragePort(ABC):
     ) -> Iterable["NdaPolicy"]:
         """List every NDA policy for a tenant (workspace compliance view)."""
 
+    # -- Rate limit policies --------------------------------------------------------
+
+    @abstractmethod
+    async def list_rate_limit_policies(self, *, tier: str) -> Iterable[dict]:
+        """List enabled rate-limit policy rows for a subscription tier."""
+
     # -- Workspace-wide aggregates (dashboards) -------------------------------------
 
     @abstractmethod

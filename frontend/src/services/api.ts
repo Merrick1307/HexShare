@@ -24,7 +24,7 @@ import {
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_APP_URL || '').replace(/\/$/, '');
 const API_PREFIX = `${API_BASE_URL}/api/v1`;
-const AUTH_PREFIX = `${API_BASE_URL}/api`;
+const AUTH_PREFIX = `${API_BASE_URL}/api/v1`;
 
 type UploadInitResponse = {
   document_id: string;

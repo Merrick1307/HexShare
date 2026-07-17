@@ -1,0 +1,7 @@
+Hello {{ recipient_name }},
+
+Your access to the document "{{ document_name }}" shared by {{ owner_name }} has expired.
+
+Expired at: {{ expired_at }}
+
+Please contact {{ owner_name }} if you need continued access.

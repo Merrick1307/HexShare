@@ -1,0 +1,10 @@
+Hello {{ recipient_name }},
+
+You are required to accept the following NDA: {{ title }}
+
+Deadline: {{ deadline }}
+
+Please click the link below to accept:
+{{ acceptance_link }}
+
+If you have questions, please contact your administrator.

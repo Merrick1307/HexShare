@@ -295,7 +295,7 @@ export function ExternalRoomInvitation() {
                   <CardTitle>Access subject</CardTitle>
                   <CardDescription>Provisioned external identity bound to this room session.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4 text-sm text-zinc-600">
+                <CardContent className="max-h-64 overflow-y-auto space-y-4 text-sm text-zinc-600">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-zinc-700">
                       <Shield className="h-5 w-5" />
@@ -332,7 +332,7 @@ export function ExternalRoomInvitation() {
                 <CardTitle>Room documents</CardTitle>
                 <CardDescription>Only documents in the provisioned room are visible here.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="max-h-96 overflow-y-auto space-y-3">
                 {documents.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-zinc-200 px-6 py-10 text-center text-sm text-zinc-500">
                     No documents are currently visible in this room.

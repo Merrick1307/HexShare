@@ -11,13 +11,20 @@ import asyncpg
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from app.adapters import NoopEventBus, JWTTokenAdapter
+from app.adapters import NoopEventBus, InMemoryEventBus, JWTTokenAdapter
 from app.adapters.authz.hex_iam import HexIAMAuthorizer
+from app.adapters.email import TransactionalEmailAdapter, NoopEmailAdapter
+from app.adapters.email.template_loader import EmailTemplateLoader
+from app.adapters.event_dispatcher import EventDispatcher
+from app.adapters.rate_limiting import PolicyLoader
+from app.adapters.rate_limiting.backends import (
+    InMemoryRateLimitBackend,
+    PostgresRateLimitBackend,
+    RedisRateLimitBackend,
+)
 from app.adapters.oidc import GoogleOIDCClient, HexIAMOIDCClient
-from app.api.auth_oidc import router as auth_oidc_router
 from app.api.router import api_router
-from app.api.uploads import router as uploads_router
-from app.api.user import router as user_router
+from app.api.routes.uploads import build_router as build_uploads_router
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import TenantAuthDependency
 from app.auth.external_room_auth import ExternalRoomAuthDependency
@@ -51,6 +58,17 @@ def _to_bool(value: str | None, *, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_email_adapter(adapter: str):
+    if adapter == "noop":
+        email_adapter = NoopEmailAdapter()
+    elif adapter == "smtp":
+        from app.adapters.email import SmtpEmailAdapter
+        email_adapter = SmtpEmailAdapter()
+    else:
+        email_adapter = TransactionalEmailAdapter()
+    return email_adapter
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     dp_pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
@@ -63,6 +81,9 @@ async def lifespan(fastapi_app: FastAPI):
     preferred_rendered_page_cache = os.getenv("HEXSHARE_RENDERED_PAGE_CACHE", "inmemory")
     preferred_task_queue = os.getenv("HEXSHARE_TASK_QUEUE", "noop")
     preferred_iam_policy = os.getenv("HEXSHARE_IAM_POLICY", "hexiam")
+    preferred_email_adapter = os.getenv("HEXSHARE_EMAIL_ADAPTER", "noop")
+    preferred_rate_limit_backend = os.getenv("HEXSHARE_RATE_LIMIT_BACKEND", "memory")
+    rate_limit_enabled = _to_bool(os.getenv("HEXSHARE_RATE_LIMIT_ENABLED"), default=False)
     pdp_iam_url = os.getenv("HEXIAM_PDP_URL") or os.getenv("HEXIAM_URL", "http://localhost:8000")
     viewer_strategy = os.getenv("HEXSHARE_VIEWER_STRATEGY", "secure_streaming").strip() or "secure_streaming"
     document_processing_enabled = _to_bool(
@@ -116,12 +137,43 @@ async def lifespan(fastapi_app: FastAPI):
         if preferred_authenticator == "local"
         else None
     )
-    event_bus = NoopEventBus()
+    event_bus = InMemoryEventBus()
+
+    # Initialize email adapter
+    email_adapter = get_email_adapter(preferred_email_adapter)
+
+    template_loader = EmailTemplateLoader()
+    event_dispatcher = EventDispatcher(event_bus=event_bus, email_service=email_adapter)
+
+    # Initialize rate limiting
+    policy_loader = PolicyLoader(persistence_layer)
+    
+    if rate_limit_enabled:
+        match preferred_rate_limit_backend:
+            case "redis":
+                # Requires Redis connection
+                try:
+                    import redis.asyncio as redis
+                    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+                    redis_client = redis.from_url(redis_url)
+                    rate_limit_backend = RedisRateLimitBackend(redis_client)
+                except Exception as e:
+                    logging.getLogger("hexshare").warning(
+                        f"Redis rate limit backend failed ({e}), falling back to PostgreSQL"
+                    )
+                    rate_limit_backend = PostgresRateLimitBackend(dp_pool)
+            case "postgres":
+                rate_limit_backend = PostgresRateLimitBackend(dp_pool)
+            case _:
+                rate_limit_backend = InMemoryRateLimitBackend()
+    else:
+        rate_limit_backend = None
+
     document_service = DocumentService(persistence_layer, event_bus)
     document_group_service = DocumentGroupService(persistence_layer, iam_policy)
     link_service = LinkService(persistence_layer, token_adapter, event_bus)
-    external_room_access_service = ExternalRoomAccessService(storage=persistence_layer)
-    nda_service = NdaService(storage=persistence_layer, object_storage=object_storage)
+    external_room_access_service = ExternalRoomAccessService(storage=persistence_layer, event_bus=event_bus)
+    nda_service = NdaService(storage=persistence_layer, object_storage=object_storage, event_bus=event_bus)
     document_processor = DocumentProcessor()
     max_upload = os.getenv("HEXSHARE_MAX_UPLOAD_SIZE_BYTES")
     upload_service = UploadService(
@@ -156,6 +208,12 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.task_queue = task_queue
     fastapi_app.state.token_adapter = token_adapter
     fastapi_app.state.event_bus = event_bus
+    fastapi_app.state.email_adapter = email_adapter
+    fastapi_app.state.template_loader = template_loader
+    fastapi_app.state.event_dispatcher = event_dispatcher
+    fastapi_app.state.policy_loader = policy_loader
+    fastapi_app.state.rate_limit_backend = rate_limit_backend
+    fastapi_app.state.rate_limit_enabled = rate_limit_enabled
     fastapi_app.state.document_service = document_service
     fastapi_app.state.document_group_service = document_group_service
     fastapi_app.state.document_processor = document_processor
@@ -204,16 +262,14 @@ def create_app(*args, **kwargs) -> FastAPI:
 
     from app.services import NdaAcceptanceRequired
 
-    app = FastAPI(title="HexShare", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="HexShare", version="0.2.0", lifespan=lifespan)
 
     @app.exception_handler(NdaAcceptanceRequired)
     async def _nda_required_handler(_request, exc: NdaAcceptanceRequired):
         return JSONResponse(status_code=403, content={"detail": exc.detail})
 
     app.include_router(api_router(), prefix="/api/v1")
-    app.include_router(uploads_router, prefix="/api/v1")
-    app.include_router(auth_oidc_router, prefix="/api")
-    app.include_router(user_router, prefix="/api/user")
+    # app.include_router(build_uploads_router(), prefix="/api/v1")
 
     frontend_url = os.getenv("HEXSHARE_FRONTEND_URL", "http://localhost:3000").rstrip("/")
     app.add_middleware(

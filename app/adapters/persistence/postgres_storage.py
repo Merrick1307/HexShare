@@ -1197,6 +1197,16 @@ class PostgresStorage(StoragePort):
             rows = await con.fetch(sql, tenant_id)
         return [self._row_to_nda_policy(row) for row in rows if row]
 
+    async def list_rate_limit_policies(self, *, tier: str) -> Iterable[dict]:
+        sql = """
+        SELECT policy_name, limit_count, window_seconds
+        FROM rate_limit_policies
+        WHERE tier = $1 AND enabled = TRUE
+        """
+        async with self._pool.acquire() as con:
+            rows = await con.fetch(sql, tier)
+        return [dict(row) for row in rows]
+
     async def get_workspace_summary(self, *, tenant_id: str) -> dict:
         sql = """
         SELECT

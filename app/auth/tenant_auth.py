@@ -11,6 +11,7 @@ introspection endpoints to validate access tokens.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Mapping, Sequence, Callable, Optional
 
 from fastapi import Depends, HTTPException, Request
@@ -78,6 +79,18 @@ class TenantAuthDependency:
         return verify
 
 
-def get_tenant_auth() -> TenantPrincipal:
-    return TenantAuthDependency()()
+@lru_cache(maxsize=1)
+def _default_tenant_auth_dependency() -> TenantAuthDependency:
+    return TenantAuthDependency()
 
+
+def get_tenant_auth() -> Callable:
+    def verify(credentials: HTTPAuthorizationCredentials = Depends(_http_bearer), request: Request = None):
+        dependency = getattr(getattr(request, "app", None), "state", None)
+        tenant_auth = getattr(dependency, "tenant_auth", None) if dependency is not None else None
+        if tenant_auth is None:
+            tenant_auth = _default_tenant_auth_dependency()
+        verifier = tenant_auth()
+        return verifier(credentials=credentials, request=request)
+
+    return verify

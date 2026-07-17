@@ -12,6 +12,7 @@ S3 storage, Redis Streams event bus).
 
 from .jwt_token import JWTTokenAdapter
 from .noop_event_bus import NoopEventBus
+from .in_memory_event_bus import InMemoryEventBus
 from .access_control import EdgeAccessControl, HybridAccessControl, PDPAccessControl
 from .auth import HEXIAMAuthenticator, LocalJWTAuthenticator
 from .iam import HexIAMPolicyClient, LocalIAMPolicyClient
@@ -26,6 +27,7 @@ from .email import TransactionalEmailAdapter, NoopEmailAdapter, SmtpEmailAdapter
 __all__ = [
     "JWTTokenAdapter",
     "NoopEventBus",
+    "InMemoryEventBus",
     "HEXIAMAuthenticator",
     "LocalJWTAuthenticator",
     "HexIAMPolicyClient",

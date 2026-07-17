@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.adapters.rate_limiting import rate_limit
 from app.api.dependencies.services import get_document_service, get_upload_service
 from app.auth import TenantPrincipal
 from app.auth.tenant_auth import get_tenant_auth
@@ -17,10 +18,7 @@ from app.schemas.upload import (
 from app.services.document_service import DocumentService
 from app.services.upload_service import UploadService
 
-router = APIRouter(tags=["uploads"])
 
-
-@router.post("/uploads/initiate", response_model=InitiateUploadResponse)
 async def initiate_upload(
     payload: InitiateUploadRequest,
     principal: TenantPrincipal = Depends(get_tenant_auth()),
@@ -49,7 +47,6 @@ async def initiate_upload(
     )
 
 
-@router.post("/uploads/complete", response_model=Document)
 async def complete_upload(
     payload: CompleteUploadRequest,
     principal: TenantPrincipal = Depends(get_tenant_auth()),
@@ -79,7 +76,6 @@ async def complete_upload(
         raise HTTPException(status_code=400, detail="Upload completion failed")
 
 
-@router.get("/documents/{document_id}/download", response_model=DownloadUrlResponse)
 async def get_document_download_url(
     document_id: str,
     expires_in: int = Query(default=900, ge=60, le=3600),
@@ -109,3 +105,26 @@ async def get_document_download_url(
         download_url=download_url,
         expires_in=expires_in,
     )
+
+
+def build_router() -> APIRouter:
+    router = APIRouter(tags=["uploads"], dependencies=[Depends(rate_limit("document_upload"))])
+    router.add_api_route(
+        "/uploads/initiate",
+        initiate_upload,
+        methods=["POST"],
+        response_model=InitiateUploadResponse,
+    )
+    router.add_api_route(
+        "/uploads/complete",
+        complete_upload,
+        methods=["POST"],
+        response_model=Document,
+    )
+    router.add_api_route(
+        "/documents/{document_id}/download",
+        get_document_download_url,
+        methods=["GET"],
+        response_model=DownloadUrlResponse,
+    )
+    return router

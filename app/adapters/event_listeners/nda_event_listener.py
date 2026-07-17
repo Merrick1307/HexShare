@@ -68,14 +68,19 @@ class NdaEventListener:
 
     async def handle_nda_accepted(self, tenant_id: str, payload: Dict[str, Any]) -> None:
         """Handle NDA accepted event."""
-        recipient_email = payload.get("recipient_email")
-        nda_title = payload.get("title")
+        recipient_email = payload.get("subject_email") or payload.get("recipient_email")
+        nda_title = payload.get("nda_policy_title") or payload.get("title")
 
         context = {
-            "recipient_name": payload.get("recipient_name", "User"),
+            "recipient_name": payload.get("typed_name") or payload.get("recipient_name", "User"),
             "title": nda_title,
             "accepted_at": payload.get("accepted_at"),
         }
+
+        # Only send if we have a recipient email
+        if not recipient_email:
+            print(f"[NDA Event] Skipping email - no recipient email in payload: {payload}")
+            return
 
         message = self.template_loader.create_email_message(
             to=recipient_email,

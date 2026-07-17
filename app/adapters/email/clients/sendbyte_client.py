@@ -30,7 +30,7 @@ class SendByteClient(EmailClient):
         from_name: str = None,
     ):
         self.api_key = api_key or os.getenv("SENDBYTE_API_KEY")
-        self.api_url = api_url or os.getenv("SENDBYTE_API_URL", "https://api.sendbyte.com/v1")
+        self.api_url = api_url or os.getenv("SENDBYTE_API_URL", "https://api.sendbyte.africa/v1")
         self.from_email = from_email or os.getenv("SENDBYTE_FROM_EMAIL")
         self.from_name = from_name or os.getenv("SENDBYTE_FROM_NAME", "HexShare")
 
@@ -42,18 +42,22 @@ class SendByteClient(EmailClient):
     async def send_email(self, message: EmailMessage) -> str:
         """Send a single email via SendByte."""
         payload = self._build_payload(message)
+        print(f"[SendByte] Sending email payload: {payload}")
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.api_url}/send",
+                    f"{self.api_url}/emails",
                     json=payload,
                     headers=self._get_headers(),
                     timeout=10,
                 )
+                print(f"[SendByte] Response status: {response.status_code}")
+                print(f"[SendByte] Response body: {response.text}")
                 response.raise_for_status()
                 data = response.json()
-                return data.get("message_id", "sent")
+                return data.get("id", "sent")
         except httpx.HTTPError as e:
+            print(f"[SendByte] HTTP Error: {e}")
             raise EmailSendError(f"SendByte API error: {str(e)}") from e
 
     async def send_bulk_email(self, messages: List[EmailMessage]) -> List[str]:
@@ -86,30 +90,15 @@ class SendByteClient(EmailClient):
     def _build_payload(self, message: EmailMessage) -> dict:
         """Build SendByte API payload."""
         payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [{"email": message.to}],
+            "from": f"{self.from_name} <{self.from_email}>",
+            "to": message.to,
             "subject": message.subject,
-            "text": message.body,
         }
 
+        # SendByte Africa requires html, use html_body if available, otherwise use body as html
         if message.html_body:
             payload["html"] = message.html_body
-
-        if message.cc:
-            payload["cc"] = [{"email": cc} for cc in message.cc]
-
-        if message.bcc:
-            payload["bcc"] = [{"email": bcc} for bcc in message.bcc]
-
-        if message.reply_to:
-            payload["reply_to"] = {"email": message.reply_to}
-
-        if message.template_id:
-            payload["template_id"] = message.template_id
-            if message.template_vars:
-                payload["variables"] = message.template_vars
+        elif message.body:
+            payload["html"] = message.body
 
         return payload

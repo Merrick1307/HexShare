@@ -24,6 +24,7 @@ from app.domain import (
 )
 from app.ports.object_storage_port import ObjectStoragePort, ObjectWriteRequest
 from app.ports.storage_port import StoragePort
+from app.ports import EventBusPort
 
 
 class NdaError(ValueError):
@@ -52,9 +53,10 @@ class NdaSubject:
 
 
 class NdaService:
-    def __init__(self, *, storage: StoragePort, object_storage: ObjectStoragePort) -> None:
+    def __init__(self, *, storage: StoragePort, object_storage: ObjectStoragePort, event_bus: EventBusPort | None = None) -> None:
         self._storage = storage
         self._object_storage = object_storage
+        self._event_bus = event_bus
 
     @staticmethod
     def _now() -> datetime:
@@ -333,4 +335,23 @@ class NdaService:
             accepted_at=self._now(),
         )
         await self._storage.save_nda_acceptance(acceptance)
+        
+        # Emit nda.accepted event for email notification
+        if self._event_bus:
+            await self._event_bus.publish_event(
+                policy.tenant_id,
+                "nda.accepted",
+                {
+                    "nda_policy_id": policy.id,
+                    "nda_policy_title": policy.title,
+                    "scope_type": policy.scope_type.value,
+                    "scope_id": policy.scope_id,
+                    "subject_kind": subject.subject_kind.value,
+                    "subject_id": subject.subject_id,
+                    "subject_email": subject.presented_email,
+                    "typed_name": name,
+                    "accepted_at": acceptance.accepted_at.isoformat(),
+                },
+            )
+        
         return acceptance

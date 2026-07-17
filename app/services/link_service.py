@@ -158,16 +158,27 @@ class LinkService:
             created_by=created_by,
         )
         await self._storage.save_share_link(share_link)
-        await self._event_bus.publish_event(
-            tenant_id,
-            "link.created",
-            {
-                "link_id": link_id,
-                "document_id": document_id,
-                "created_by": created_by,
-                "expires_at": expires_at.isoformat(),
-            },
-        )
+        
+        # Emit document.shared event for email notification
+        if normalized_recipient_email:
+            document = await self._storage.get_document(tenant_id=tenant_id, document_id=document_id)
+            await self._event_bus.publish_event(
+                tenant_id,
+                "document.shared",
+                {
+                    "recipient_email": normalized_recipient_email,
+                    "recipient_name": recipient_label or "User",
+                    "document_name": document.name if document else "Document",
+                    "document_id": document_id,
+                    "shared_by": created_by,
+                    "shared_by_name": "A colleague",  # TODO: Get actual user name
+                    "access_link": share_link, #f"/view/{link_id}",  # TODO: Generate actual token URL
+                    "expires_at": expires_at.isoformat(),
+                    "can_download": can_download,
+                    "can_print": can_print,
+                },
+            )
+        
         return share_link
 
     async def generate_share_token(self, link: ShareLink) -> str:

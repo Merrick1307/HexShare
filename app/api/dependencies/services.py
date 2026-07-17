@@ -79,3 +79,11 @@ def get_template_loader(request: Request):
 
 def get_event_dispatcher(request: Request):
     return request.app.state.event_dispatcher
+
+
+def get_policy_loader(request: Request):
+    return getattr(request.app.state, "policy_loader", None)
+
+
+def get_rate_limit_backend(request: Request):
+    return getattr(request.app.state, "rate_limit_backend", None)

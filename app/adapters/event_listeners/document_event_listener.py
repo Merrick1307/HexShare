@@ -86,6 +86,30 @@ class DocumentEventListener:
         )
         await self.email_service.send_email(message)
 
+    async def handle_external_room_invited(self, tenant_id: str, payload: Dict[str, Any]) -> None:
+        """Handle external room invited event."""
+        recipient_email = payload.get("recipient_email")
+        room_name = payload.get("room_name")
+        invited_by_name = payload.get("invited_by_name", "A colleague")
+
+        context = {
+            "room_name": room_name,
+            "recipient_name": payload.get("recipient_name", "User"),
+            "invited_by_name": invited_by_name,
+            "invite_link": payload.get("invite_link"),
+            "invite_expires_at": payload.get("invite_expires_at"),
+            "can_download": payload.get("can_download", False),
+            "can_print": payload.get("can_print", False),
+        }
+
+        message = self.template_loader.create_email_message(
+            to=recipient_email,
+            subject=f"{invited_by_name} invited you to '{room_name}'",
+            template_base="external_room/invited",
+            context=context,
+        )
+        await self.email_service.send_email(message)
+
     async def handle_event(self, event_name: str, tenant_id: str, payload: Dict[str, Any]) -> None:
         """Route events to appropriate handlers."""
         if event_name == "document.shared":
@@ -94,3 +118,5 @@ class DocumentEventListener:
             await self.handle_document_accessed(tenant_id, payload)
         elif event_name == "share_link.expired":
             await self.handle_share_link_expired(tenant_id, payload)
+        elif event_name == "external_room.invited":
+            await self.handle_external_room_invited(tenant_id, payload)

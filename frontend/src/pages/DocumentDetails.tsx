@@ -40,6 +40,7 @@ export function DocumentDetails() {
     items: links,
     total: linksTotal,
     isLoading: linksLoading,
+    error: linksError,
     sentinelRef: linksSentinelRef,
     reset: resetLinks,
     setItems: setLinks,
@@ -187,7 +188,12 @@ export function DocumentDetails() {
                 <span>{linksTotal} total</span>
               </div>
 
-              {links.length === 0 ? (
+              {linksError ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <p className="font-medium">Could not load share links.</p>
+                  <p className="mt-1">{linksError}</p>
+                </div>
+              ) : links.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-200 px-6 py-10 text-center text-sm text-zinc-500">No share links yet for this document.</div>
               ) : (
                 <div ref={linksContainerRef} className="space-y-3 max-h-80 overflow-y-auto">
@@ -213,9 +219,8 @@ export function DocumentDetails() {
                                 {link.access_mode === 'identified' ? <Badge variant="neutral">Recipient-bound</Badge> : null}
                               </div>
                               {link.bound_email_normalized ? <div className="text-xs text-zinc-500">Bound recipient: <span className="font-mono">{link.bound_email_normalized}</span></div> : null}
-                              <div className="text-xs text-zinc-500">Share URL: <span className="break-all font-mono">{shareUrl}</span></div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex shrink-0 items-center gap-2">
                               <Button type="button" variant="outline" size="sm" onClick={() => void copyToClipboard(shareUrl)}>
                                 {copiedValue === shareUrl ? <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-600" /> : <Copy className="mr-2 h-4 w-4" />}Copy
                               </Button>
@@ -224,6 +229,10 @@ export function DocumentDetails() {
                               </Button>
                               {!link.revoked_at ? <Button type="button" variant="danger" size="sm" className="gap-2" onClick={() => void handleRevokeLink(link.id)}><Trash2 className="h-4 w-4" />Revoke</Button> : null}
                             </div>
+                          </div>
+                          <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2">
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400">Share URL</p>
+                            <code className="block break-all text-xs leading-relaxed text-zinc-700">{shareUrl}</code>
                           </div>
                         </div>
                       </div>

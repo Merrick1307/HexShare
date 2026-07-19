@@ -28,6 +28,7 @@ export function useInfiniteScroll<T>({ fetchFn, pageSize = 20, enabled = true, r
       setHasMore(items.length + response.items.length < response.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load more items');
+      setHasMore(false);
     } finally {
       setIsLoading(false);
     }

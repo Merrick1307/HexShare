@@ -171,7 +171,7 @@ class LinkService:
                     "document_name": document.name if document else "Document",
                     "document_id": document_id,
                     "shared_by": created_by,
-                    "shared_by_name": "A colleague",  # TODO: Get actual user name
+                    "shared_by_name": "Someone on HexShare",  # TODO: Get actual user name
                     "access_link": share_link, #f"/view/{link_id}",  # TODO: Generate actual token URL
                     "expires_at": expires_at.isoformat(),
                     "can_download": can_download,

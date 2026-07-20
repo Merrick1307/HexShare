@@ -29,7 +29,7 @@ class DocumentEventListener:
         """Handle document shared event."""
         recipient_email = payload.get("recipient_email")
         document_name = payload.get("document_name")
-        shared_by_name = payload.get("shared_by_name", "A colleague")
+        shared_by_name = payload.get("shared_by_name") or "Someone on HexShare"
 
         context = {
             "document_name": document_name,
@@ -90,7 +90,7 @@ class DocumentEventListener:
         """Handle external room invited event."""
         recipient_email = payload.get("recipient_email")
         room_name = payload.get("room_name")
-        invited_by_name = payload.get("invited_by_name", "A colleague")
+        invited_by_name = payload.get("invited_by_name") or "Someone on HexShare"
 
         context = {
             "room_name": room_name,

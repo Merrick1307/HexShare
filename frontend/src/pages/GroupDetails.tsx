@@ -25,6 +25,7 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { NdaAdminPanel } from '../components/NdaAdminPanel';
 
 type WorkspaceUser = { id: string; user_id?: string; email?: string; name?: string; username?: string };
@@ -65,6 +66,8 @@ export function GroupDetails() {
   const [externalInviteDays, setExternalInviteDays] = useState(7);
   const [latestProvision, setLatestProvision] = useState<ProvisionExternalRoomAccessResponse | null>(null);
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
+  const [revokeAccessTarget, setRevokeAccessTarget] = useState<ExternalRoomGrant | null>(null);
+  const [removeDocumentTarget, setRemoveDocumentTarget] = useState<Document | null>(null);
   const PAGE_SIZE = 10;
 
   const loadData = useCallback(async () => {
@@ -81,7 +84,7 @@ export function GroupDetails() {
       setDocuments(docs);
       setExternalAccess(grants);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load group');
+      setError(err instanceof Error ? err.message : 'Failed to load room');
     } finally {
       setIsLoading(false);
     }
@@ -221,15 +224,14 @@ export function GroupDetails() {
     }
   }
 
-  async function handleRevokeExternalAccess(grant: ExternalRoomGrant) {
-    if (!id) return;
-    const label = grant.display_name || grant.email;
-    if (!confirm(`Revoke external room access for "${label}"?`)) return;
+  async function handleRevokeExternalAccess() {
+    if (!id || !revokeAccessTarget) return;
     setIsSubmitting(true);
     setError(null);
     try {
-      await api.revokeExternalRoomAccess(id, grant.grant_id);
+      await api.revokeExternalRoomAccess(id, revokeAccessTarget.grant_id);
       setSuccessMessage('External room access revoked.');
+      setRevokeAccessTarget(null);
       setExternalAccess(await api.listExternalRoomAccess(id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to revoke external access');
@@ -238,15 +240,16 @@ export function GroupDetails() {
     }
   }
 
-  async function handleRemoveFromGroup(doc: Document) {
-    if (!confirm(`Remove "${doc.name}" from this group?`)) return;
+  async function handleRemoveFromGroup() {
+    if (!removeDocumentTarget) return;
     setIsSubmitting(true);
     try {
-      await api.moveDocumentToGroup(doc.id, null);
-      setSuccessMessage('Document removed from group.');
+      await api.moveDocumentToGroup(removeDocumentTarget.id, null);
+      setSuccessMessage('Document removed from room.');
+      setRemoveDocumentTarget(null);
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove document');
+      setError(err instanceof Error ? err.message : 'Failed to remove document from room');
     } finally {
       setIsSubmitting(false);
     }
@@ -266,9 +269,9 @@ export function GroupDetails() {
     return (
       <div className="space-y-4">
         <Link to="/groups" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900">
-          <ArrowLeft className="h-4 w-4" /> Back to Groups
+          <ArrowLeft className="h-4 w-4" /> Back to Rooms
         </Link>
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error || 'Group not found'}</div>
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error || 'Room not found'}</div>
       </div>
     );
   }
@@ -279,7 +282,7 @@ export function GroupDetails() {
     <div className="space-y-8">
       <div>
         <Link to="/groups" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900">
-          <ArrowLeft className="h-4 w-4" /> Back to Groups
+          <ArrowLeft className="h-4 w-4" /> Back to Rooms
         </Link>
       </div>
 
@@ -304,7 +307,7 @@ export function GroupDetails() {
           </Button>
           <Button onClick={() => setIsUploadModalOpen(true)} className="gap-2">
             <Upload className="h-4 w-4" />
-            Upload to Group
+            Upload to Room
           </Button>
         </div>
       </div>
@@ -353,7 +356,7 @@ export function GroupDetails() {
                 <td colSpan={4} className="px-6 py-12 text-center text-zinc-500">
                   <div className="flex flex-col items-center justify-center">
                     <FileText className="mb-3 h-10 w-10 text-zinc-300" />
-                    <p className="text-base font-medium text-zinc-900">No documents in this group</p>
+                    <p className="text-base font-medium text-zinc-900">No documents in this room</p>
                     <p className="mt-1 text-sm">Upload a document to get started.</p>
                   </div>
                 </td>
@@ -379,10 +382,10 @@ export function GroupDetails() {
                   <td className="px-6 py-4 text-right">
                     <button
                       type="button"
-                      onClick={() => handleRemoveFromGroup(doc)}
+                      onClick={() => setRemoveDocumentTarget(doc)}
                       disabled={isSubmitting}
                       className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50"
-                      title="Remove from group"
+                      title="Remove from room"
                     >
                       <FolderOutput className="h-4 w-4" />
                       Remove
@@ -464,7 +467,7 @@ export function GroupDetails() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         {!grant.revoked_at ? (
-                          <Button type="button" variant="outline" size="sm" onClick={() => void handleRevokeExternalAccess(grant)}>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setRevokeAccessTarget(grant)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Revoke
                           </Button>
@@ -479,7 +482,7 @@ export function GroupDetails() {
         </div>
       </div>
 
-      <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="Upload to Group">
+      <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="Upload to Room">
         <form onSubmit={handleUpload} className="space-y-6">
           {uploadError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{uploadError}</div>}
           <div className="space-y-2">
@@ -656,6 +659,35 @@ export function GroupDetails() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!revokeAccessTarget}
+        title="Revoke external access"
+        description={
+          revokeAccessTarget
+            ? `Revoke room access for "${revokeAccessTarget.display_name || revokeAccessTarget.email}"? This recipient will no longer be able to use this room grant.`
+            : ''
+        }
+        confirmLabel="Revoke access"
+        isConfirming={isSubmitting}
+        onCancel={() => setRevokeAccessTarget(null)}
+        onConfirm={() => void handleRevokeExternalAccess()}
+      />
+
+      <ConfirmDialog
+        isOpen={!!removeDocumentTarget}
+        title="Remove document from room"
+        description={
+          removeDocumentTarget
+            ? `Remove "${removeDocumentTarget.name}" from this room? The document will stay in your workspace.`
+            : ''
+        }
+        confirmLabel="Remove"
+        isConfirming={isSubmitting}
+        variant="primary"
+        onCancel={() => setRemoveDocumentTarget(null)}
+        onConfirm={() => void handleRemoveFromGroup()}
+      />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { WorkspaceStats } from '../components/WorkspaceStats';
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll';
 
@@ -87,7 +88,7 @@ function DocumentRowMenu({
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
               >
                 <FolderInput className="h-4 w-4" />
-                Move to group
+                Move to room
               </button>
               <div className="my-1 border-t border-zinc-100" />
               <button
@@ -122,6 +123,25 @@ const DEFAULT_LINK_DRAFT: LinkDraft = {
   allowed_emails: '',
 };
 
+function truncateMiddle(value: string, start = 18, end = 10) {
+  if (value.length <= start + end + 3) return value;
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
+function compactShareUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split('/').filter(Boolean);
+    const token = parts[parts.length - 1] || '';
+    if (parts[0] === 'view' && token) {
+      return `${url.origin}/view/${truncateMiddle(token, 10, 8)}`;
+    }
+    return `${url.origin}${truncateMiddle(url.pathname, 20, 10)}`;
+  } catch {
+    return truncateMiddle(value, 28, 12);
+  }
+}
+
 export function Dashboard() {
   const containerRef = useRef<HTMLDivElement>(null);
   const {
@@ -147,6 +167,7 @@ export function Dashboard() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [createLinkError, setCreateLinkError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [linkDraft, setLinkDraft] = useState<LinkDraft>(DEFAULT_LINK_DRAFT);
   const [lastCreatedLink, setLastCreatedLink] = useState<ShareLink | null>(null);
@@ -155,6 +176,7 @@ export function Dashboard() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [moveTargetGroupId, setMoveTargetGroupId] = useState<string>('');
+  const [deleteTarget, setDeleteTarget] = useState<Document | null>(null);
 
   const refreshDocuments = useCallback(async () => {
     resetDocs();
@@ -175,7 +197,7 @@ export function Dashboard() {
       const resp = await api.listGroups(0, 100);
       setGroups(resp.items);
     } catch {
-      // groups are optional, don't block on failure
+      // Rooms are optional, don't block on failure.
     }
   }, []);
 
@@ -222,7 +244,7 @@ export function Dashboard() {
 
       let uploadedDocument: Document;
       if (selectedGroupId) {
-        // Upload to selected group
+        // Upload to the selected room.
         uploadedDocument = await api.createDocumentInGroup(selectedGroupId, {
           name: file.name,
           mime_type: file.type || 'application/octet-stream',
@@ -230,7 +252,7 @@ export function Dashboard() {
           storage_key: uploadInit.object_key,
         });
       } else {
-        // Upload without group
+        // Upload without assigning a room.
         uploadedDocument = await api.completeUpload({
           document_id: uploadInit.document_id,
           object_key: uploadInit.object_key,
@@ -263,6 +285,7 @@ export function Dashboard() {
     setSelectedDocument(document);
     setIsCreateLinkModalOpen(true);
     setActionError(null);
+    setCreateLinkError(null);
     setLastCreatedLink(null);
     setLinkDraft(DEFAULT_LINK_DRAFT);
   }
@@ -271,6 +294,7 @@ export function Dashboard() {
     e.preventDefault();
     if (!selectedDocument) return;
     setActionError(null);
+    setCreateLinkError(null);
     setSuccessMessage(null);
     setIsSubmitting(true);
     try {
@@ -288,7 +312,7 @@ export function Dashboard() {
       setSuccessMessage(`Share link created for ${selectedDocument.name}.`);
       await loadData();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Failed to create link');
+      setCreateLinkError(error instanceof Error ? error.message : 'Failed to create link');
     } finally {
       setIsSubmitting(false);
     }
@@ -311,7 +335,7 @@ export function Dashboard() {
       await api.moveDocumentToGroup(selectedDocument.id, targetGroupId);
       setIsMoveModalOpen(false);
       setSelectedDocument(null);
-      setSuccessMessage(targetGroupId ? 'Document moved to group.' : 'Document removed from group.');
+      setSuccessMessage(targetGroupId ? 'Document moved to room.' : 'Document removed from room.');
       await loadData();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to move document');
@@ -320,16 +344,20 @@ export function Dashboard() {
     }
   }
 
-  async function handleDelete(doc: Document) {
-    if (!confirm(`Are you sure you want to delete "${doc.name}"? This action cannot be undone.`)) return;
+  async function handleDelete() {
+    if (!deleteTarget) return;
     setOpenMenuId(null);
     setActionError(null);
+    setIsSubmitting(true);
     try {
-      await api.deleteDocument(doc.id);
-      setSuccessMessage(`"${doc.name}" deleted.`);
+      await api.deleteDocument(deleteTarget.id);
+      setSuccessMessage(`"${deleteTarget.name}" deleted.`);
+      setDeleteTarget(null);
       await loadData();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to delete document');
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -429,7 +457,10 @@ export function Dashboard() {
                         onToggle={() => setOpenMenuId((current) => current === doc.id ? null : doc.id)}
                         onCreateLink={openCreateLinkModal}
                         onMoveToGroup={openMoveModal}
-                        onDelete={handleDelete}
+                        onDelete={(document) => {
+                          setOpenMenuId(null);
+                          setDeleteTarget(document);
+                        }}
                       />
                     </td>
                   </tr>
@@ -453,18 +484,18 @@ export function Dashboard() {
           </div>
           {groups.length > 0 && (
             <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-900">Add to Group (optional)</label>
+              <label className="text-sm font-medium text-zinc-900">Add to Room (optional)</label>
               <select
                 className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 value={selectedGroupId}
                 onChange={(e) => setSelectedGroupId(e.target.value)}
               >
-                <option value="">No group (personal documents)</option>
+                <option value="">No room (personal documents)</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>{g.name}</option>
                 ))}
               </select>
-              <p className="text-xs text-zinc-500">Optionally assign this document to a group for shared access.</p>
+              <p className="text-xs text-zinc-500">Optionally assign this document to a room for shared access.</p>
             </div>
           )}
           <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
@@ -474,8 +505,20 @@ export function Dashboard() {
         </form>
       </Modal>
 
-      <Modal isOpen={isCreateLinkModalOpen} onClose={() => setIsCreateLinkModalOpen(false)} title="Create share link">
+      <Modal
+        isOpen={isCreateLinkModalOpen}
+        onClose={() => {
+          setIsCreateLinkModalOpen(false);
+          setCreateLinkError(null);
+        }}
+        title="Create share link"
+      >
         <form onSubmit={handleCreateLink} className="space-y-6">
+          {createLinkError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {createLinkError}
+            </div>
+          ) : null}
           <div><label className="text-sm font-medium text-zinc-900">Expiry (days)</label><Input type="number" min={1} max={365} value={linkDraft.expires_in_days} onChange={(e) => setLinkDraft((current) => ({ ...current, expires_in_days: Number(e.target.value) || 1 }))} className="mt-1.5" /></div>
           <div className="space-y-3">
             <label className="text-sm font-medium text-zinc-900">Permissions</label>
@@ -484,28 +527,50 @@ export function Dashboard() {
             <label className="flex items-center gap-3 text-sm text-zinc-700"><input type="checkbox" checked={linkDraft.require_email} onChange={(e) => setLinkDraft((current) => ({ ...current, require_email: e.target.checked }))} /><span>Require email</span></label>
           </div>
           <div><label className="text-sm font-medium text-zinc-900">Allowed emails</label><Input className="mt-1.5" placeholder="client@acme.com, approver@corp.io" value={linkDraft.allowed_emails} onChange={(e) => setLinkDraft((current) => ({ ...current, allowed_emails: e.target.value }))} /></div>
-          {lastCreatedLink ? <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-900">Share URL: <span className="break-all font-mono">{api.toAbsoluteFrontendUrl(lastCreatedLink.share_path)}</span></div> : null}
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4"><Button type="button" variant="outline" onClick={() => setIsCreateLinkModalOpen(false)}>Cancel</Button><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Create link'}</Button></div>
+          {lastCreatedLink ? (
+            <button
+              type="button"
+              title={api.toAbsoluteFrontendUrl(lastCreatedLink.share_path)}
+              onClick={() => void navigator.clipboard.writeText(api.toAbsoluteFrontendUrl(lastCreatedLink.share_path))}
+              className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-left text-sm text-indigo-900"
+            >
+              <span className="min-w-0 truncate font-mono">{compactShareUrl(api.toAbsoluteFrontendUrl(lastCreatedLink.share_path))}</span>
+              <span className="text-xs font-medium">Copy</span>
+            </button>
+          ) : null}
+          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsCreateLinkModalOpen(false);
+                setCreateLinkError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Create link'}</Button>
+          </div>
         </form>
       </Modal>
 
-      <Modal isOpen={isMoveModalOpen} onClose={() => setIsMoveModalOpen(false)} title="Move to Group">
+      <Modal isOpen={isMoveModalOpen} onClose={() => setIsMoveModalOpen(false)} title="Move to Room">
         <div className="space-y-6">
           {actionError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</div>}
           {selectedDocument && (
             <div className="rounded-lg bg-zinc-50 px-4 py-3">
               <p className="text-sm font-medium text-zinc-900">{selectedDocument.name}</p>
-              <p className="text-xs text-zinc-500">{selectedDocument.room_id ? `Currently in a group` : 'Not in any group'}</p>
+              <p className="text-xs text-zinc-500">{selectedDocument.room_id ? 'Currently in a room' : 'Not in any room'}</p>
             </div>
           )}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-900">Select Target Group</label>
+            <label className="text-sm font-medium text-zinc-900">Select Target Room</label>
             <select
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               value={moveTargetGroupId}
               onChange={(e) => setMoveTargetGroupId(e.target.value)}
             >
-              <option value="">No group (personal documents)</option>
+              <option value="">No room (personal documents)</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>{g.name}</option>
               ))}
@@ -519,6 +584,20 @@ export function Dashboard() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete document"
+        description={
+          deleteTarget
+            ? `Delete "${deleteTarget.name}"? This action cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        isConfirming={isSubmitting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void handleDelete()}
+      />
     </div>
   );
 }

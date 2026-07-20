@@ -30,8 +30,8 @@ const productHighlights = [
     icon: Upload,
   },
   {
-    title: 'Document groups',
-    description: 'Organize documents into shared groups so the right people can access the right material.',
+    title: 'Document rooms',
+    description: 'Organize documents into shared rooms so the right people can access the right material.',
     icon: FolderOpen,
   },
   {
@@ -82,11 +82,11 @@ const workflowSteps = [
 const productSurfaces = [
   {
     title: 'Documents workspace',
-    description: 'Manage uploads, search your library, move files between groups, and create links from one place.',
+    description: 'Manage uploads, search your library, move files between rooms, and create links from one place.',
   },
   {
-    title: 'Group management',
-    description: 'Create shared spaces for teams, projects, or clients and control membership at the group level.',
+    title: 'Room management',
+    description: 'Create shared spaces for teams, projects, or clients and control membership at the room level.',
   },
   {
     title: 'Document details',
@@ -138,7 +138,7 @@ const faqItems = [
   },
   {
     question: 'What can users do in the app today?',
-    answer: 'Users can upload documents, organize them into groups, share protected links, inspect analytics, and revoke access.',
+    answer: 'Users can upload documents, organize them into rooms, share protected links, inspect analytics, and revoke access.',
   },
   {
     question: 'Can HexShare be self-hosted?',
@@ -205,7 +205,7 @@ export function Landing() {
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-relaxed text-zinc-600">
                 HexShare gives teams a self-hosted workspace for protected document delivery. Upload files, organize
-                them into groups, enforce OIDC-backed access, and keep visibility after a link is sent.
+                them into rooms, enforce OIDC-backed access, and keep visibility after a link is sent.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link to="/signup">
@@ -248,7 +248,7 @@ export function Landing() {
               <div className="mt-6 space-y-4">
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Upload and organize</p>
-                  <p className="mt-2 text-sm text-zinc-200">Keep documents structured with shared groups and a workspace built for ongoing access management.</p>
+                  <p className="mt-2 text-sm text-zinc-200">Keep documents structured with shared rooms and a workspace built for ongoing access management.</p>
                 </div>
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Share with precision</p>

@@ -121,7 +121,7 @@ export function Groups() {
     try {
       resetGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load groups');
+      setError(err instanceof Error ? err.message : 'Failed to load rooms');
     } finally {
       setIsLoading(false);
     }
@@ -144,14 +144,14 @@ export function Groups() {
     setError(null);
     try {
       await api.createGroup({ name: formData.name.trim(), description: formData.description.trim() || undefined });
-      // Refresh token to get updated policy with new group permissions
+      // Refresh token to get updated policy with new room permissions.
       await api.refreshToken();
       setIsCreateModalOpen(false);
       setFormData({ name: '', description: '' });
-      setSuccessMessage('Group created successfully.');
+      setSuccessMessage('Room created successfully.');
       await loadGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create group');
+      setError(err instanceof Error ? err.message : 'Failed to create room');
     } finally {
       setIsSubmitting(false);
     }
@@ -167,10 +167,10 @@ export function Groups() {
       setIsEditModalOpen(false);
       setSelectedGroup(null);
       setFormData({ name: '', description: '' });
-      setSuccessMessage('Group updated successfully.');
+      setSuccessMessage('Room updated successfully.');
       await loadGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update group');
+      setError(err instanceof Error ? err.message : 'Failed to update room');
     } finally {
       setIsSubmitting(false);
     }
@@ -184,10 +184,10 @@ export function Groups() {
       await api.deleteGroup(selectedGroup.id);
       setIsDeleteModalOpen(false);
       setSelectedGroup(null);
-      setSuccessMessage('Group deleted successfully.');
+      setSuccessMessage('Room deleted successfully.');
       await loadGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete group');
+      setError(err instanceof Error ? err.message : 'Failed to delete room');
     } finally {
       setIsSubmitting(false);
     }
@@ -208,12 +208,12 @@ export function Groups() {
     <div className="space-y-8">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Groups</h1>
-          <p className="mt-1 text-sm text-zinc-500">Organize documents into shared workspaces.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Rooms</h1>
+          <p className="mt-1 text-sm text-zinc-500">Organize documents into controlled shared spaces.</p>
         </div>
         <Button onClick={() => { setFormData({ name: '', description: '' }); setIsCreateModalOpen(true); }} className="gap-2">
           <Plus className="h-4 w-4" />
-          New Group
+          New Room
         </Button>
       </div>
 
@@ -232,14 +232,14 @@ export function Groups() {
           </thead>
           <tbody className="divide-y divide-zinc-200">
             {isLoading && groups.length === 0 ? (
-              <tr><td colSpan={4} className="px-6 py-8 text-center text-zinc-500">Loading groups...</td></tr>
+              <tr><td colSpan={4} className="px-6 py-8 text-center text-zinc-500">Loading rooms...</td></tr>
             ) : groups.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-6 py-12 text-center text-zinc-500">
                   <div className="flex flex-col items-center justify-center">
                     <Folder className="mb-3 h-10 w-10 text-zinc-300" />
-                    <p className="text-base font-medium text-zinc-900">No groups yet</p>
-                    <p className="mt-1 text-sm">Create a group to organize your documents.</p>
+                    <p className="text-base font-medium text-zinc-900">No rooms yet</p>
+                    <p className="mt-1 text-sm">Create a room to organize your documents.</p>
                   </div>
                 </td>
               </tr>
@@ -256,7 +256,7 @@ export function Groups() {
                       </Link>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-zinc-600">{group.description || <span className="text-zinc-400">—</span>}</td>
+                  <td className="px-6 py-4 text-zinc-600">{group.description || <span className="text-zinc-400">-</span>}</td>
                   <td className="px-6 py-4 text-zinc-600">{format(new Date(group.created_at), 'MMM d, yyyy')}</td>
                   <td className="px-6 py-4 text-right">
                     <GroupRowMenu
@@ -274,11 +274,11 @@ export function Groups() {
         </table>
         <div ref={groupsSentinelRef} className="h-1" />
         {groupsLoading && groups.length > 0 ? (
-          <div className="px-6 py-3 text-center text-sm text-zinc-400">Loading more groups...</div>
+          <div className="px-6 py-3 text-center text-sm text-zinc-400">Loading more rooms...</div>
         ) : null}
       </div>
 
-      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create Group">
+      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create Room">
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
             <label className="text-sm font-medium text-zinc-900">Name</label>
@@ -295,7 +295,7 @@ export function Groups() {
         </form>
       </Modal>
 
-      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Group">
+      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Room">
         <form onSubmit={handleEdit} className="space-y-4">
           <div>
             <label className="text-sm font-medium text-zinc-900">Name</label>
@@ -312,8 +312,8 @@ export function Groups() {
         </form>
       </Modal>
 
-      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Group">
-        <p className="text-sm text-zinc-600">Are you sure you want to delete <strong>{selectedGroup?.name}</strong>? Documents in this group will become ungrouped.</p>
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Room">
+        <p className="text-sm text-zinc-600">Are you sure you want to delete <strong>{selectedGroup?.name}</strong>? Documents in this room will become unassigned.</p>
         <div className="mt-6 flex justify-end gap-3">
           <Button type="button" variant="outline" onClick={() => setIsDeleteModalOpen(false)}>Cancel</Button>
           <Button type="button" variant="danger" onClick={handleDelete} disabled={isSubmitting}>{isSubmitting ? 'Deleting...' : 'Delete'}</Button>

@@ -273,7 +273,7 @@ class ExternalRoomAccessService:
                     "room_id": room_id,
                     "room_name": group.name if group else "External Room",
                     "invited_by": principal.user_id,
-                    "invited_by_name": "A colleague",  # TODO: Get actual user name
+                    "invited_by_name": "Someone on HexShare",  # TODO: Get actual user name
                     "invite_link": f"/external-room/invitations/{invite_token}",
                     "invite_expires_at": invite_expires_at.isoformat(),
                     "can_download": can_download,

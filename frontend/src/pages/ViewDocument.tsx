@@ -512,12 +512,16 @@ export function ViewDocument() {
       );
     }
 
+    const fallbackMessage = preview.kind === 'unsupported'
+      ? preview.message
+      : 'Preview is not available for this file type in the secure viewer.';
+
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <Card className="w-full max-w-2xl border-zinc-200 bg-white/95">
           <CardHeader>
             <CardTitle className="text-xl text-zinc-900">Preview unavailable</CardTitle>
-            <CardDescription className="mt-2 text-zinc-500">{preview.message}</CardDescription>
+            <CardDescription className="mt-2 text-zinc-500">{fallbackMessage}</CardDescription>
           </CardHeader>
         </Card>
       </div>

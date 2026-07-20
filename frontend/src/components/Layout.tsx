@@ -8,7 +8,7 @@ export function Layout() {
   const location = useLocation();
   const navItems = [
     { icon: FileText, label: 'Documents', path: '/dashboard' },
-    { icon: Folder, label: 'Groups', path: '/groups' },
+    { icon: Folder, label: 'Rooms', path: '/groups' },
     { icon: Activity, label: 'Activity', path: '/activity' },
     { icon: ShieldCheck, label: 'NDAs', path: '/ndas' },
   ];

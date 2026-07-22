@@ -158,7 +158,7 @@ class LinkService:
             created_by=created_by,
         )
         await self._storage.save_share_link(share_link)
-        
+        token = await self.generate_share_token(share_link)
         # Emit document.shared event for email notification
         if normalized_recipient_email:
             document = await self._storage.get_document(tenant_id=tenant_id, document_id=document_id)
@@ -172,7 +172,7 @@ class LinkService:
                     "document_id": document_id,
                     "shared_by": created_by,
                     "shared_by_name": "Someone on HexShare",  # TODO: Get actual user name
-                    "access_link": share_link, #f"/view/{link_id}",  # TODO: Generate actual token URL
+                    "access_link": token,  # TODO: Generate actual token URL
                     "expires_at": expires_at.isoformat(),
                     "can_download": can_download,
                     "can_print": can_print,

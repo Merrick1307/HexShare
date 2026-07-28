@@ -353,5 +353,27 @@ class NdaService:
                     "accepted_at": acceptance.accepted_at.isoformat(),
                 },
             )
+            if subject.external_party_id or subject.presented_email:
+                await self._event_bus.publish_event(
+                    policy.tenant_id,
+                    "recipient.nda_accepted",
+                    {
+                        "tenant_id": policy.tenant_id,
+                        "owner_user_id": None,
+                        "document_id": (
+                            policy.scope_id
+                            if policy.scope_type == NdaScopeType.DOCUMENT
+                            else None
+                        ),
+                        "room_id": (
+                            policy.scope_id
+                            if policy.scope_type == NdaScopeType.ROOM
+                            else None
+                        ),
+                        "external_party_id": subject.external_party_id,
+                        "visitor_session_id": subject.session_id,
+                        "occurred_at": acceptance.accepted_at.isoformat(),
+                    },
+                )
         
         return acceptance

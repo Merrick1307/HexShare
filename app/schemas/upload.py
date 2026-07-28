@@ -18,6 +18,7 @@ class InitiateUploadResponse(BaseModel):
     expires_in: int
     required_headers: dict[str, str] = Field(default_factory=dict)
     required_form_fields: dict[str, str] = Field(default_factory=dict)
+    protection: dict[str, object]
 
 
 class CompleteUploadRequest(BaseModel):
@@ -27,6 +28,8 @@ class CompleteUploadRequest(BaseModel):
     mime_type: str
     size: int = Field(ge=1)
     etag: str | None = None
+    room_id: str | None = None
+    room_section_id: str | None = None
 
 
 class DownloadUrlResponse(BaseModel):

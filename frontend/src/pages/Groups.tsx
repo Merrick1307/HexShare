@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Folder, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Folder, Plus, MoreHorizontal, Pencil, Search, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { DocumentGroup } from '../types';
 import { Button } from '../components/ui/Button';
@@ -91,6 +91,12 @@ function GroupRowMenu({
 
 export function Groups() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const fetchGroups = useCallback(
+    (offset: number, limit: number) => api.listGroups(offset, limit, debouncedQuery || undefined),
+    [debouncedQuery],
+  );
   const {
     items: groups,
     total: groupsTotal,
@@ -98,12 +104,13 @@ export function Groups() {
     sentinelRef: groupsSentinelRef,
     reset: resetGroups,
   } = useInfiniteScroll<DocumentGroup>({
-    fetchFn: (offset, limit) => api.listGroups(offset, limit),
+    fetchFn: fetchGroups,
     pageSize: 20,
     rootRef: containerRef,
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -137,11 +144,20 @@ export function Groups() {
     return () => window.clearTimeout(timer);
   }, [successMessage]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    resetGroups();
+  }, [debouncedQuery, resetGroups]);
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     if (!formData.name.trim()) return;
     setIsSubmitting(true);
-    setError(null);
+    setModalError(null);
     try {
       await api.createGroup({ name: formData.name.trim(), description: formData.description.trim() || undefined });
       // Refresh token to get updated policy with new room permissions.
@@ -151,7 +167,7 @@ export function Groups() {
       setSuccessMessage('Room created successfully.');
       await loadGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create room');
+      setModalError(err instanceof Error ? err.message : 'Failed to create room');
     } finally {
       setIsSubmitting(false);
     }
@@ -161,7 +177,7 @@ export function Groups() {
     e.preventDefault();
     if (!selectedGroup || !formData.name.trim()) return;
     setIsSubmitting(true);
-    setError(null);
+    setModalError(null);
     try {
       await api.updateGroup(selectedGroup.id, { name: formData.name.trim(), description: formData.description.trim() || undefined });
       setIsEditModalOpen(false);
@@ -170,7 +186,7 @@ export function Groups() {
       setSuccessMessage('Room updated successfully.');
       await loadGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update room');
+      setModalError(err instanceof Error ? err.message : 'Failed to update room');
     } finally {
       setIsSubmitting(false);
     }
@@ -179,7 +195,7 @@ export function Groups() {
   async function handleDelete() {
     if (!selectedGroup) return;
     setIsSubmitting(true);
-    setError(null);
+    setModalError(null);
     try {
       await api.deleteGroup(selectedGroup.id);
       setIsDeleteModalOpen(false);
@@ -187,19 +203,21 @@ export function Groups() {
       setSuccessMessage('Room deleted successfully.');
       await loadGroups();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete room');
+      setModalError(err instanceof Error ? err.message : 'Failed to delete room');
     } finally {
       setIsSubmitting(false);
     }
   }
 
   function openEditModal(group: DocumentGroup) {
+    setModalError(null);
     setSelectedGroup(group);
     setFormData({ name: group.name, description: group.description || '' });
     setIsEditModalOpen(true);
   }
 
   function openDeleteModal(group: DocumentGroup) {
+    setModalError(null);
     setSelectedGroup(group);
     setIsDeleteModalOpen(true);
   }
@@ -211,7 +229,7 @@ export function Groups() {
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Rooms</h1>
           <p className="mt-1 text-sm text-zinc-500">Organize documents into controlled shared spaces.</p>
         </div>
-        <Button onClick={() => { setFormData({ name: '', description: '' }); setIsCreateModalOpen(true); }} className="gap-2">
+        <Button onClick={() => { setFormData({ name: '', description: '' }); setModalError(null); setIsCreateModalOpen(true); }} className="gap-2">
           <Plus className="h-4 w-4" />
           New Room
         </Button>
@@ -219,6 +237,16 @@ export function Groups() {
 
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+        <Input
+          className="pl-9"
+          placeholder="Search rooms by name or description..."
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+        />
+      </div>
 
       <div ref={containerRef} className="overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-sm max-h-[calc(100vh-16rem)]">
         <table className="w-full text-left text-sm">
@@ -238,8 +266,18 @@ export function Groups() {
                 <td colSpan={4} className="px-6 py-12 text-center text-zinc-500">
                   <div className="flex flex-col items-center justify-center">
                     <Folder className="mb-3 h-10 w-10 text-zinc-300" />
-                    <p className="text-base font-medium text-zinc-900">No rooms yet</p>
-                    <p className="mt-1 text-sm">Create a room to organize your documents.</p>
+                    <p className="text-base font-medium text-zinc-900">
+                      {debouncedQuery ? `No rooms match "${debouncedQuery}"` : 'No rooms yet'}
+                    </p>
+                    <p className="mt-1 text-sm">
+                      {debouncedQuery ? 'Try another name or description.' : 'Create a room to organize your documents.'}
+                    </p>
+                    {debouncedQuery ? <button type="button" className="mt-3 text-sm font-medium text-indigo-600 hover:underline" onClick={() => setSearchQuery('')}>Clear search</button> : null}
+                    {!debouncedQuery ? (
+                      <Button type="button" size="sm" className="mt-4" onClick={() => { setFormData({ name: '', description: '' }); setModalError(null); setIsCreateModalOpen(true); }}>
+                        Create your first room
+                      </Button>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -278,8 +316,9 @@ export function Groups() {
         ) : null}
       </div>
 
-      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create Room">
+      <Modal isOpen={isCreateModalOpen} onClose={() => { setIsCreateModalOpen(false); setModalError(null); }} title="Create Room">
         <form onSubmit={handleCreate} className="space-y-4">
+          {modalError ? <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div> : null}
           <div>
             <label className="text-sm font-medium text-zinc-900">Name</label>
             <Input className="mt-1.5" value={formData.name} onChange={(e) => setFormData((d) => ({ ...d, name: e.target.value }))} required />
@@ -289,14 +328,15 @@ export function Groups() {
             <Input className="mt-1.5" value={formData.description} onChange={(e) => setFormData((d) => ({ ...d, description: e.target.value }))} />
           </div>
           <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
-            <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { setIsCreateModalOpen(false); setModalError(null); }}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Create'}</Button>
           </div>
         </form>
       </Modal>
 
-      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Room">
+      <Modal isOpen={isEditModalOpen} onClose={() => { setIsEditModalOpen(false); setModalError(null); }} title="Edit Room">
         <form onSubmit={handleEdit} className="space-y-4">
+          {modalError ? <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div> : null}
           <div>
             <label className="text-sm font-medium text-zinc-900">Name</label>
             <Input className="mt-1.5" value={formData.name} onChange={(e) => setFormData((d) => ({ ...d, name: e.target.value }))} required />
@@ -306,16 +346,17 @@ export function Groups() {
             <Input className="mt-1.5" value={formData.description} onChange={(e) => setFormData((d) => ({ ...d, description: e.target.value }))} />
           </div>
           <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
-            <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { setIsEditModalOpen(false); setModalError(null); }}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save'}</Button>
           </div>
         </form>
       </Modal>
 
-      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Delete Room">
+      <Modal isOpen={isDeleteModalOpen} onClose={() => { setIsDeleteModalOpen(false); setModalError(null); }} title="Delete Room">
         <p className="text-sm text-zinc-600">Are you sure you want to delete <strong>{selectedGroup?.name}</strong>? Documents in this room will become unassigned.</p>
+        {modalError ? <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div> : null}
         <div className="mt-6 flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={() => setIsDeleteModalOpen(false)}>Cancel</Button>
+          <Button type="button" variant="outline" onClick={() => { setIsDeleteModalOpen(false); setModalError(null); }}>Cancel</Button>
           <Button type="button" variant="danger" onClick={handleDelete} disabled={isSubmitting}>{isSubmitting ? 'Deleting...' : 'Delete'}</Button>
         </div>
       </Modal>

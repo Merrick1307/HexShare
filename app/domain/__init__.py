@@ -19,6 +19,7 @@ Key entities include:
 from .models import (
     Document,
     DocumentGroup,
+    DocumentProtection,
     DocumentPermission,
     ExternalAccessGrant,
     ExternalAccessGrantType,
@@ -34,6 +35,7 @@ from .models import (
     NdaPolicy,
     NdaScopeType,
     NdaSubjectKind,
+    RoomSection,
     ShareLink,
     ShareLinkAccessMode,
     VisitorSession,
@@ -44,6 +46,7 @@ from .models import (
 __all__ = [
     "Document",
     "DocumentGroup",
+    "DocumentProtection",
     "DocumentPermission",
     "ExternalAccessGrant",
     "ExternalAccessGrantType",
@@ -59,6 +62,7 @@ __all__ = [
     "NdaPolicy",
     "NdaScopeType",
     "NdaSubjectKind",
+    "RoomSection",
     "ShareLink",
     "ShareLinkAccessMode",
     "VisitorSession",

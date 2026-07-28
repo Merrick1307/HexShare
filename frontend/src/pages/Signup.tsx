@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { HexLogo } from '../components/ui/HexLogo';
 import { api } from '../services/api';
 
-export function Signup() {
+export function Signup({ productName = 'HexShare' }: { productName?: string }) {
   const [isLoading, setIsLoading] = useState(false);
 
   function handleSSOSignup() {
@@ -19,7 +19,7 @@ export function Signup() {
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center">
         <Link to="/" className="mb-8 flex items-center gap-3 text-zinc-950">
           <HexLogo className="h-12 w-12" />
-          <span className="text-3xl font-semibold tracking-tight">HexShare</span>
+          <span className="text-3xl font-semibold tracking-tight">{productName}</span>
         </Link>
       </div>
 
@@ -27,7 +27,9 @@ export function Signup() {
         <Card className="border-zinc-200 shadow-sm">
           <CardHeader className="space-y-1 text-center">
             <CardTitle className="text-2xl">Create a workspace</CardTitle>
-            <CardDescription>Continue with the configured single sign-on provider.</CardDescription>
+            <CardDescription>
+              Start an individual workspace for protected documents and ordered rooms.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -36,6 +38,11 @@ export function Signup() {
                 <p>You will be redirected to the configured identity provider to continue.</p>
               </div>
             </div>
+            <p className="text-center text-xs leading-relaxed text-zinc-500">
+              Upload common business documents after signup. PDF provides the strongest
+              recipient-watermarked viewer; other accepted formats show their protection
+              level before sharing.
+            </p>
             <Button type="button" className="w-full gap-2" disabled={isLoading} onClick={handleSSOSignup}>
               {isLoading ? 'Redirecting...' : 'Continue to signup'}
               <ArrowRight className="h-4 w-4" />

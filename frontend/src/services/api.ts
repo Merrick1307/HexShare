@@ -17,6 +17,9 @@ import {
   PaginatedResponse,
   WorkspaceSummary,
   ProvisionExternalRoomAccessResponse,
+  ReissuedInvitation,
+  RoomSection,
+  NotificationPreferences,
   ShareInspection,
   ShareLink,
   ViewSession,
@@ -42,6 +45,12 @@ type CreateDocumentInput = {
   storage_key: string;
 };
 
+export type DocumentListOptions = {
+  fileType?: 'all' | 'pdf' | 'image' | 'word' | 'spreadsheet' | 'presentation' | 'text' | 'other';
+  sortBy?: 'uploaded' | 'name' | 'size' | 'links' | 'opens';
+  sortDirection?: 'asc' | 'desc';
+};
+
 function toAbsoluteApiUrl(pathOrUrl: string) {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
   return `${API_BASE_URL}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`;
@@ -59,6 +68,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
       const payload = await response.json().catch(() => null);
       const detail = payload?.detail;
       if (typeof detail === 'string') throw new Error(detail);
+      if (detail && typeof detail === 'object') {
+        throw new Error(detail.message || detail.code || `HTTP error ${response.status}`);
+      }
     }
     const text = await response.text();
     throw new Error(text || `HTTP error ${response.status}`);
@@ -236,8 +248,18 @@ export const api = {
   toAbsoluteApiUrl,
   toAbsoluteFrontendUrl,
 
-  async listDocuments(offset = 0, limit = 20): Promise<PaginatedResponse<Document>> {
-    return fetchWithAuth<PaginatedResponse<Document>>(`${API_PREFIX}/documents?offset=${offset}&limit=${limit}`);
+  async listDocuments(
+    offset = 0,
+    limit = 20,
+    query?: string,
+    options?: DocumentListOptions,
+  ): Promise<PaginatedResponse<Document>> {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (query !== undefined) params.set('query', query);
+    if (options?.fileType && options.fileType !== 'all') params.set('file_type', options.fileType);
+    if (options?.sortBy) params.set('sort_by', options.sortBy);
+    if (options?.sortDirection) params.set('sort_direction', options.sortDirection);
+    return fetchWithAuth<PaginatedResponse<Document>>(`${API_PREFIX}/documents?${params.toString()}`);
   },
 
   async getDocument(documentId: string): Promise<Document> {
@@ -281,6 +303,8 @@ export const api = {
     name: string;
     mime_type: string;
     size: number;
+    room_id?: string;
+    room_section_id?: string;
   }): Promise<Document> {
     return fetchWithAuth<Document>(`${API_PREFIX}/uploads/complete`, {
       method: 'POST',
@@ -385,6 +409,36 @@ export const api = {
   async getWorkspaceSummary(): Promise<WorkspaceSummary> {
     return fetchWithAuth<WorkspaceSummary>(`${API_PREFIX}/workspace/summary`);
   },
+  async recordProductEvent(
+    eventName:
+      | 'onboarding_shown'
+      | 'onboarding_step_clicked'
+      | 'first_document_uploaded'
+      | 'first_room_created'
+      | 'first_share_created'
+      | 'first_recipient_viewed'
+      | 'onboarding_dismissed'
+      | 'onboarding_completed',
+    step?: 'upload_document' | 'create_room' | 'create_share' | 'view_activity',
+  ): Promise<void> {
+    await fetchWithAuth<void>(`${API_PREFIX}/workspace/product-events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_name: eventName, step }),
+    });
+  },
+
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    return fetchWithAuth<NotificationPreferences>(`${API_PREFIX}/notification-preferences`);
+  },
+
+  async updateNotificationPreferences(payload: NotificationPreferences): Promise<NotificationPreferences> {
+    return fetchWithAuth<NotificationPreferences>(`${API_PREFIX}/notification-preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
 
   async getActivity(limit = 50): Promise<ActivityItem[]> {
     return fetchWithAuth<ActivityItem[]>(`${API_PREFIX}/activity?limit=${limit}`);
@@ -466,8 +520,10 @@ export const api = {
     await fetchPublic<void>(`${API_PREFIX}/view-sessions/${sessionId}/close`, { method: 'POST' });
   },
 
-  async listGroups(offset = 0, limit = 20): Promise<PaginatedResponse<DocumentGroup>> {
-    return fetchWithAuth<PaginatedResponse<DocumentGroup>>(`${API_PREFIX}/document-groups?offset=${offset}&limit=${limit}`);
+  async listGroups(offset = 0, limit = 20, query?: string): Promise<PaginatedResponse<DocumentGroup>> {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (query !== undefined) params.set('query', query);
+    return fetchWithAuth<PaginatedResponse<DocumentGroup>>(`${API_PREFIX}/document-groups?${params.toString()}`);
   },
 
   async createGroup(data: { name: string; description?: string }): Promise<DocumentGroup> {
@@ -494,6 +550,46 @@ export const api = {
 
   async listGroupDocuments(groupId: string): Promise<Document[]> {
     return fetchWithAuth<Document[]>(`${API_PREFIX}/document-groups/${groupId}/documents`);
+  },
+
+  async listRoomSections(groupId: string): Promise<RoomSection[]> {
+    return fetchWithAuth<RoomSection[]>(`${API_PREFIX}/document-groups/${groupId}/sections`);
+  },
+
+  async createRoomSection(groupId: string, name: string): Promise<RoomSection> {
+    return fetchWithAuth<RoomSection>(`${API_PREFIX}/document-groups/${groupId}/sections`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+  },
+
+  async renameRoomSection(groupId: string, sectionId: string, name: string): Promise<RoomSection> {
+    return fetchWithAuth<RoomSection>(`${API_PREFIX}/document-groups/${groupId}/sections/${sectionId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+  },
+
+  async deleteRoomSection(groupId: string, sectionId: string): Promise<void> {
+    await fetchWithAuth<void>(`${API_PREFIX}/document-groups/${groupId}/sections/${sectionId}`, { method: 'DELETE' });
+  },
+
+  async reorderRoomSections(groupId: string, sectionIds: string[]): Promise<RoomSection[]> {
+    return fetchWithAuth<RoomSection[]>(`${API_PREFIX}/document-groups/${groupId}/sections/order`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section_ids: sectionIds }),
+    });
+  },
+
+  async reorderRoomDocuments(groupId: string, sectionId: string | null, documentIds: string[]): Promise<Document[]> {
+    return fetchWithAuth<Document[]>(`${API_PREFIX}/document-groups/${groupId}/documents/order`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section_id: sectionId, document_ids: documentIds }),
+    });
+  },
+
+  async placeDocument(documentId: string, roomId: string, sectionId: string | null, position?: number): Promise<Document> {
+    return fetchWithAuth<Document>(`${API_PREFIX}/documents/${documentId}/placement`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_id: roomId, section_id: sectionId, position }),
+    });
   },
 
   async createDocumentInGroup(
@@ -554,6 +650,17 @@ export const api = {
     });
   },
 
+  async reissueExternalRoomInvitation(groupId: string, grantId: string, delivery: 'email' | 'return_link'): Promise<ReissuedInvitation> {
+    return fetchWithAuth<ReissuedInvitation>(
+      `${API_PREFIX}/document-groups/${groupId}/external-access/${encodeURIComponent(grantId)}/invitation`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delivery }),
+      },
+    );
+  },
+
   async inspectExternalRoomInvite(token: string): Promise<ExternalRoomInviteInspection> {
     return fetchPublic<ExternalRoomInviteInspection>(`${API_PREFIX}/external-room/invitations/${encodeURIComponent(token)}`);
   },
@@ -572,6 +679,10 @@ export const api = {
 
   async listExternalRoomDocuments(): Promise<Document[]> {
     return fetchExternal<Document[]>(`${API_PREFIX}/external-room/current/documents`);
+  },
+
+  async listExternalRoomSections(): Promise<RoomSection[]> {
+    return fetchExternal<RoomSection[]>(`${API_PREFIX}/external-room/current/sections`);
   },
 
   async getExternalRoomNda(documentId?: string): Promise<NdaStatus[]> {

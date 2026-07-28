@@ -28,7 +28,7 @@ from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
-from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, ShareLink
+from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, RoomSection, ShareLink
 from app.ports.access_control import AccessDenied
 from app.schemas.nda import (
     NdaAcceptRequest,
@@ -310,6 +310,36 @@ def build_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="Forbidden")
         await external_room_access_service.record_document_list(principal=principal)
         return list(docs)
+
+    @router.get("/external-room/current/sections", response_model=list[RoomSection])
+    async def list_external_room_sections(
+        principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+        nda_service: NdaService = Depends(get_nda_service),
+    ) -> list[RoomSection]:
+        subject = NdaService.subject_from_room_principal(principal)
+        await nda_service.require_room_accepted(
+            tenant_id=principal.tenant_id, room_id=principal.room_id, subject=subject
+        )
+        try:
+            documents = list(
+                await group_service.list_group_documents(
+                    principal=principal.as_tenant_principal(),
+                    group_id=principal.room_id,
+                )
+            )
+            sections = await group_service.list_sections(
+                principal=principal.as_tenant_principal(),
+                group_id=principal.room_id,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        visible_section_ids = {
+            document.room_section_id
+            for document in documents
+            if document.room_section_id is not None
+        }
+        return [section for section in sections if section.id in visible_section_ids]
 
     @router.get("/external-room/current/nda", response_model=list[NdaStatusResponse])
     async def get_external_room_nda(

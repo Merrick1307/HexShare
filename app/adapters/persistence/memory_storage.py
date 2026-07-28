@@ -25,6 +25,7 @@ from app.domain import (
     ExternalRoomSession,
     NdaAcceptance,
     NdaPolicy,
+    RoomSection,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -46,6 +47,9 @@ class MemoryStorage(StoragePort):
         )
         # tenant_id -> {group_id: DocumentGroup}
         self._doc_groups: Dict[str, Dict[str, DocumentGroup]] = defaultdict(dict)
+        self._room_sections: Dict[str, Dict[str, Dict[str, RoomSection]]] = defaultdict(
+            lambda: defaultdict(dict)
+        )
         self._external_parties: Dict[str, Dict[str, ExternalParty]] = defaultdict(dict)
         self._external_party_by_email: Dict[str, Dict[str, str]] = defaultdict(dict)
         self._external_party_emails: Dict[str, Dict[str, ExternalPartyEmail]] = defaultdict(dict)
@@ -62,6 +66,15 @@ class MemoryStorage(StoragePort):
         return f"{prefix}_{self._id_counter}"
 
     async def save_document(self, document: Document) -> None:
+        if document.room_id is not None:
+            existing = [
+                item
+                for item in self._documents.get(document.tenant_id, {}).values()
+                if item.room_id == document.room_id
+                and item.room_section_id == document.room_section_id
+                and item.id != document.id
+            ]
+            document = document.copy(update={"room_position": len(existing)})
         self._documents[document.tenant_id][document.id] = document
 
     async def get_document(self, *, tenant_id: str, document_id: str) -> Optional[Document]:
@@ -193,13 +206,182 @@ class MemoryStorage(StoragePort):
                 result.append(doc)
         return sorted(result, key=lambda d: d.created_at, reverse=True)
 
+    async def page_ungrouped_documents_by_permission(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        required_permission: int,
+        query: Optional[str],
+        offset: int,
+        limit: int,
+    ) -> tuple[list[Document], int]:
+        docs = list(
+            await self.list_ungrouped_documents_by_permission(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                required_permission=required_permission,
+            )
+        )
+        normalized = (query or "").strip().casefold()
+        if query is not None:
+            docs = [doc for doc in docs if normalized and normalized in doc.name.casefold()]
+        return docs[offset : offset + limit], len(docs)
+
     async def list_documents_by_room(
         self, *, tenant_id: str, room_id: str
     ) -> Iterable[Document]:
         docs = [
             d for d in self._documents.get(tenant_id, {}).values() if d.room_id == room_id
         ]
-        return sorted(docs, key=lambda d: d.created_at, reverse=True)
+        return sorted(
+            docs,
+            key=lambda d: (
+                d.room_section_id is None,
+                d.room_section_id or "",
+                d.room_position,
+                d.created_at,
+                d.id,
+            ),
+        )
+
+    async def list_room_sections(
+        self, *, tenant_id: str, room_id: str
+    ) -> Iterable[RoomSection]:
+        return sorted(
+            self._room_sections.get(tenant_id, {}).get(room_id, {}).values(),
+            key=lambda section: (section.position, section.id),
+        )
+
+    async def create_room_section(self, section: RoomSection) -> RoomSection:
+        room_sections = self._room_sections[section.tenant_id][section.room_id]
+        position = len(room_sections)
+        saved = section.copy(update={"position": position})
+        room_sections[saved.id] = saved
+        return saved
+
+    async def update_room_section(
+        self, *, tenant_id: str, room_id: str, section_id: str, name: str
+    ) -> Optional[RoomSection]:
+        section = self._room_sections.get(tenant_id, {}).get(room_id, {}).get(section_id)
+        if section is None:
+            return None
+        updated = section.copy(update={"name": name, "updated_at": datetime.utcnow()})
+        self._room_sections[tenant_id][room_id][section_id] = updated
+        return updated
+
+    async def delete_room_section(
+        self, *, tenant_id: str, room_id: str, section_id: str
+    ) -> bool:
+        sections = self._room_sections.get(tenant_id, {}).get(room_id, {})
+        if section_id not in sections:
+            return False
+        del sections[section_id]
+        for position, section in enumerate(
+            sorted(sections.values(), key=lambda item: (item.position, item.id))
+        ):
+            sections[section.id] = section.copy(update={"position": position})
+        unsectioned = sorted(
+            (
+                doc
+                for doc in self._documents.get(tenant_id, {}).values()
+                if doc.room_id == room_id and doc.room_section_id is None
+            ),
+            key=lambda item: (item.room_position, item.created_at, item.id),
+        )
+        moved = sorted(
+            (
+                doc
+                for doc in self._documents.get(tenant_id, {}).values()
+                if doc.room_id == room_id and doc.room_section_id == section_id
+            ),
+            key=lambda item: (item.room_position, item.created_at, item.id),
+        )
+        for position, doc in enumerate([*unsectioned, *moved]):
+            self._documents[tenant_id][doc.id] = doc.copy(
+                update={"room_section_id": None, "room_position": position}
+            )
+        return True
+
+    async def reorder_room_sections(
+        self, *, tenant_id: str, room_id: str, section_ids: list[str]
+    ) -> Iterable[RoomSection]:
+        sections = self._room_sections.get(tenant_id, {}).get(room_id, {})
+        if len(section_ids) != len(set(section_ids)) or set(section_ids) != set(sections):
+            raise ValueError("invalid_section_order")
+        now = datetime.utcnow()
+        for position, section_id in enumerate(section_ids):
+            sections[section_id] = sections[section_id].copy(
+                update={"position": position, "updated_at": now}
+            )
+        return await self.list_room_sections(tenant_id=tenant_id, room_id=room_id)
+
+    async def place_room_document(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        room_id: str,
+        section_id: Optional[str],
+        position: Optional[int],
+    ) -> Optional[Document]:
+        doc = self._documents.get(tenant_id, {}).get(document_id)
+        if doc is None:
+            return None
+        if section_id is not None and section_id not in self._room_sections.get(tenant_id, {}).get(room_id, {}):
+            raise ValueError("section_not_found")
+
+        old_room_id, old_section_id = doc.room_id, doc.room_section_id
+        if old_room_id is not None:
+            old_docs = [
+                item
+                for item in self._documents.get(tenant_id, {}).values()
+                if item.room_id == old_room_id
+                and item.room_section_id == old_section_id
+                and item.id != document_id
+            ]
+            for index, item in enumerate(sorted(old_docs, key=lambda value: (value.room_position, value.id))):
+                self._documents[tenant_id][item.id] = item.copy(update={"room_position": index})
+
+        target = [
+            item
+            for item in self._documents.get(tenant_id, {}).values()
+            if item.room_id == room_id
+            and item.room_section_id == section_id
+            and item.id != document_id
+        ]
+        ordered = sorted(target, key=lambda value: (value.room_position, value.created_at, value.id))
+        insert_at = len(ordered) if position is None else max(0, min(position, len(ordered)))
+        moved = doc.copy(
+            update={"room_id": room_id, "room_section_id": section_id, "room_position": insert_at}
+        )
+        ordered.insert(insert_at, moved)
+        for index, item in enumerate(ordered):
+            self._documents[tenant_id][item.id] = item.copy(update={"room_position": index})
+        return self._documents[tenant_id][document_id]
+
+    async def reorder_room_documents(
+        self,
+        *,
+        tenant_id: str,
+        room_id: str,
+        section_id: Optional[str],
+        document_ids: list[str],
+    ) -> Iterable[Document]:
+        docs = {
+            doc.id: doc
+            for doc in self._documents.get(tenant_id, {}).values()
+            if doc.room_id == room_id and doc.room_section_id == section_id
+        }
+        if len(document_ids) != len(set(document_ids)) or set(document_ids) != set(docs):
+            raise ValueError("invalid_document_order")
+        for position, document_id in enumerate(document_ids):
+            self._documents[tenant_id][document_id] = docs[document_id].copy(
+                update={"room_position": position}
+            )
+        return [
+            self._documents[tenant_id][document_id] for document_id in document_ids
+        ]
 
     async def delete_document(self, *, tenant_id: str, document_id: str) -> None:
         self._documents.get(tenant_id, {}).pop(document_id, None)
@@ -220,6 +402,33 @@ class MemoryStorage(StoragePort):
             g for gid, g in self._doc_groups.get(tenant_id, {}).items() if gid in wanted
         ]
         return sorted(groups, key=lambda g: g.created_at, reverse=True)
+
+    async def page_document_groups_by_ids(
+        self,
+        *,
+        tenant_id: str,
+        group_ids: Iterable[str],
+        query: Optional[str],
+        offset: int,
+        limit: int,
+    ) -> tuple[list[DocumentGroup], int]:
+        groups = list(
+            await self.list_document_groups_by_ids(
+                tenant_id=tenant_id, group_ids=group_ids
+            )
+        )
+        normalized = (query or "").strip().casefold()
+        if query is not None:
+            groups = [
+                group
+                for group in groups
+                if normalized
+                and (
+                    normalized in group.name.casefold()
+                    or normalized in (group.description or "").casefold()
+                )
+            ]
+        return groups[offset : offset + limit], len(groups)
 
     async def update_document_group(
         self,
@@ -243,11 +452,14 @@ class MemoryStorage(StoragePort):
 
     async def delete_document_group(self, *, tenant_id: str, group_id: str) -> None:
         self._doc_groups.get(tenant_id, {}).pop(group_id, None)
+        self._room_sections.get(tenant_id, {}).pop(group_id, None)
         # Mirror the FK ON DELETE SET NULL behaviour from Postgres.
         for doc in self._documents.get(tenant_id, {}).values():
             if doc.room_id == group_id:
                 # Pydantic v1 models are mutable by default; reassign via copy.
-                self._documents[tenant_id][doc.id] = doc.copy(update={"room_id": None})
+                self._documents[tenant_id][doc.id] = doc.copy(
+                    update={"room_id": None, "room_section_id": None, "room_position": 0}
+                )
 
     async def update_document_room(
         self, *, tenant_id: str, document_id: str, room_id: Optional[str]
@@ -256,7 +468,18 @@ class MemoryStorage(StoragePort):
         doc = docs.get(document_id)
         if not doc:
             return None
-        updated = doc.copy(update={"room_id": room_id})
+        target_docs = [
+            item
+            for item in docs.values()
+            if item.room_id == room_id and item.room_section_id is None and item.id != document_id
+        ]
+        updated = doc.copy(
+            update={
+                "room_id": room_id,
+                "room_section_id": None,
+                "room_position": len(target_docs) if room_id else 0,
+            }
+        )
         docs[document_id] = updated
         return updated
 

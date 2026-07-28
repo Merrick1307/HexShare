@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { HexLogo } from '../components/ui/HexLogo';
 import { api } from '../services/api';
 
-export function Login() {
+export function Login({ productName = 'HexShare' }: { productName?: string }) {
   const [isLoading, setIsLoading] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
@@ -50,14 +50,14 @@ export function Login() {
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center">
         <Link to="/" className="mb-8 flex items-center gap-3 text-zinc-950">
           <HexLogo className="h-12 w-12" />
-          <span className="text-3xl font-semibold tracking-tight">HexShare</span>
+          <span className="text-3xl font-semibold tracking-tight">{productName}</span>
         </Link>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <Card className="border-zinc-200 shadow-sm">
           <CardHeader className="space-y-1 text-center">
-            <CardTitle className="text-2xl">Sign in to HexShare</CardTitle>
+            <CardTitle className="text-2xl">Sign in to {productName}</CardTitle>
             <CardDescription>Continue with the configured single sign-on provider for this workspace.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

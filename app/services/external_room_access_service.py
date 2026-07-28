@@ -44,6 +44,7 @@ class ExternalRoomPrincipal:
     permissions: int
     email: str
     display_name: str | None = None
+    brand_name: str = "HexShare"
     can_download: bool = False
     can_print: bool = False
 
@@ -65,6 +66,15 @@ class ProvisionedRoomAccess:
     invite_expires_at: datetime
 
 
+@dataclass(frozen=True)
+class ReissuedRoomInvitation:
+    grant: ExternalAccessGrant
+    invite_token: str
+    invite_expires_at: datetime
+    email_sent: bool
+    resend_available_at: datetime
+
+
 class ExternalRoomAccessService:
     def __init__(
         self,
@@ -77,9 +87,11 @@ class ExternalRoomAccessService:
         access_ttl_seconds: int | None = None,
         refresh_ttl_seconds: int | None = None,
         invite_ttl_seconds: int | None = None,
+        brand_name: str = "HexShare",
     ) -> None:
         self._storage = storage
         self._event_bus = event_bus
+        self._brand_name = brand_name.strip() or "HexShare"
         self._jwt_secret = jwt_secret or os.getenv("HEXSHARE_JWT_SECRET")
         if not self._jwt_secret:
             raise RuntimeError("Missing HEXSHARE_JWT_SECRET for external room access service")
@@ -89,6 +101,9 @@ class ExternalRoomAccessService:
         self._access_ttl_seconds = int(os.getenv("HEXSHARE_EXTERNAL_ROOM_ACCESS_TTL_SECONDS", access_ttl_seconds or 3600))
         self._refresh_ttl_seconds = int(os.getenv("HEXSHARE_EXTERNAL_ROOM_REFRESH_TTL_SECONDS", refresh_ttl_seconds or 60 * 60 * 24 * 7))
         self._invite_ttl_seconds = int(os.getenv("HEXSHARE_EXTERNAL_ROOM_INVITE_TTL_SECONDS", invite_ttl_seconds or 60 * 60 * 24 * 7))
+        self._invite_resend_cooldown_seconds = int(
+            os.getenv("HEXSHARE_EXTERNAL_ROOM_INVITE_RESEND_COOLDOWN_SECONDS", "120")
+        )
 
     @staticmethod
     def _now() -> datetime:
@@ -234,6 +249,8 @@ class ExternalRoomAccessService:
                 granted_by=principal.user_id,
                 granted_at=now,
                 updated_at=now,
+                invite_version=1,
+                last_invited_at=now,
             )
         else:
             grant = active_grant.copy(
@@ -244,6 +261,8 @@ class ExternalRoomAccessService:
                     "expires_at": grant_expires_at,
                     "updated_at": now,
                     "revoked_at": None,
+                    "invite_version": active_grant.invite_version + 1,
+                    "last_invited_at": now,
                 }
             )
         await self._storage.save_external_access_grant(grant)
@@ -257,6 +276,7 @@ class ExternalRoomAccessService:
                 "room_id": room_id,
                 "external_party_id": party.id,
                 "email": email_record.email_normalized,
+                "invite_version": grant.invite_version,
             },
             expires_at=invite_expires_at,
         )
@@ -273,7 +293,7 @@ class ExternalRoomAccessService:
                     "room_id": room_id,
                     "room_name": group.name if group else "External Room",
                     "invited_by": principal.user_id,
-                    "invited_by_name": "Someone on HexShare",  # TODO: Get actual user name
+                    "invited_by_name": principal.display_name or self._brand_name,
                     "invite_link": f"/external-room/invitations/{invite_token}",
                     "invite_expires_at": invite_expires_at.isoformat(),
                     "can_download": can_download,
@@ -301,6 +321,9 @@ class ExternalRoomAccessService:
             raise ValueError("grant_revoked")
         if grant.expires_at is not None and grant.expires_at <= self._now():
             raise ValueError("grant_expired")
+        token_version = int(payload.get("invite_version", 1))
+        if token_version != grant.invite_version:
+            raise ValueError("invite_rotated")
         party = await self._storage.get_external_party(tenant_id=tenant_id, external_party_id=grant.external_party_id)
         if party is None:
             raise ValueError("party_not_found")
@@ -315,6 +338,128 @@ class ExternalRoomAccessService:
             "email": email,
             "expires_at": datetime.fromtimestamp(int(payload["exp"]), tz=UTC).replace(tzinfo=None),
         }
+
+    async def reissue_room_invitation(
+        self,
+        *,
+        principal: TenantPrincipal,
+        room_id: str,
+        grant_id: str,
+        delivery: str,
+        invite_expires_in_seconds: int | None = None,
+    ) -> ReissuedRoomInvitation:
+        if delivery not in {"email", "return_link"}:
+            raise ValueError("invalid_invitation_delivery")
+        grant = await self._storage.get_external_access_grant(
+            tenant_id=principal.tenant_id, grant_id=grant_id
+        )
+        now = self._now()
+        if (
+            grant is None
+            or grant.resource_type != ExternalAccessResourceType.ROOM
+            or grant.resource_id != room_id
+            or grant.granted_by != principal.user_id
+        ):
+            raise ValueError("grant_not_found")
+        if grant.revoked_at is not None:
+            raise ValueError("grant_revoked")
+        if grant.expires_at is not None and grant.expires_at <= now:
+            raise ValueError("grant_expired")
+        if grant.last_invited_at is not None:
+            available_at = grant.last_invited_at + timedelta(
+                seconds=self._invite_resend_cooldown_seconds
+            )
+            if available_at > now:
+                retry_after = max(int((available_at - now).total_seconds()), 1)
+                raise ValueError(f"invite_resend_cooldown:{retry_after}")
+
+        party = await self._storage.get_external_party(
+            tenant_id=principal.tenant_id,
+            external_party_id=grant.external_party_id,
+        )
+        email_record = await self._storage.get_external_party_primary_email(
+            tenant_id=principal.tenant_id,
+            external_party_id=grant.external_party_id,
+        )
+        group = await self._storage.get_document_group(
+            tenant_id=principal.tenant_id, group_id=room_id
+        )
+        if party is None or email_record is None or group is None:
+            raise ValueError("grant_not_found")
+
+        rotated = grant.copy(
+            update={
+                "invite_version": grant.invite_version + 1,
+                "last_invited_at": now,
+                "updated_at": now,
+            }
+        )
+        await self._storage.save_external_access_grant(rotated)
+        invite_expires_at = now + timedelta(
+            seconds=invite_expires_in_seconds or self._invite_ttl_seconds
+        )
+        invite_token = self._encode_token(
+            token_use="external_room_invite",
+            payload={
+                "tenant_id": principal.tenant_id,
+                "grant_id": rotated.id,
+                "room_id": room_id,
+                "external_party_id": party.id,
+                "email": email_record.email_normalized,
+                "invite_version": rotated.invite_version,
+            },
+            expires_at=invite_expires_at,
+        )
+        email_sent = False
+        if delivery == "email" and self._event_bus:
+            try:
+                await self._event_bus.publish_event(
+                    principal.tenant_id,
+                    "external_room.invited",
+                    {
+                        "recipient_email": email_record.email_normalized,
+                        "recipient_name": party.display_name or "User",
+                        "room_id": room_id,
+                        "room_name": group.name,
+                        "invited_by": principal.user_id,
+                        "invited_by_name": principal.display_name or self._brand_name,
+                        "invite_link": f"/external-room/invitations/{invite_token}",
+                        "invite_expires_at": invite_expires_at.isoformat(),
+                        "can_download": rotated.can_download,
+                        "can_print": rotated.can_print,
+                        "resend": True,
+                    },
+                )
+                email_sent = True
+            except Exception:
+                # The rotation is already durable. Return the one-time link and
+                # explicit delivery status instead of losing the new token to a
+                # provider failure.
+                email_sent = False
+        if self._event_bus:
+            try:
+                await self._event_bus.publish_event(
+                    principal.tenant_id,
+                    "external_room.invitation_reissued",
+                    {
+                        "grant_id": rotated.id,
+                        "room_id": room_id,
+                        "owner_user_id": principal.user_id,
+                        "delivery": delivery,
+                        "email_sent": email_sent,
+                        "reissued_at": now.isoformat(),
+                    },
+                )
+            except Exception:
+                pass
+        return ReissuedRoomInvitation(
+            grant=rotated,
+            invite_token=invite_token,
+            invite_expires_at=invite_expires_at,
+            email_sent=email_sent,
+            resend_available_at=now
+            + timedelta(seconds=self._invite_resend_cooldown_seconds),
+        )
 
     async def create_session_from_invite(
         self,
@@ -419,6 +564,13 @@ class ExternalRoomAccessService:
                     "revoked_at": grant.revoked_at,
                     "expires_at": grant.expires_at,
                     "granted_at": grant.granted_at,
+                    "last_invited_at": grant.last_invited_at,
+                    "resend_available_at": (
+                        grant.last_invited_at
+                        + timedelta(seconds=self._invite_resend_cooldown_seconds)
+                        if grant.last_invited_at
+                        else None
+                    ),
                 }
             )
         return items
@@ -499,6 +651,7 @@ class ExternalRoomAccessService:
             permissions=grant.permissions,
             email=session.presented_email,
             display_name=party.display_name,
+            brand_name=self._brand_name,
             can_download=grant.can_download,
             can_print=grant.can_print,
         )

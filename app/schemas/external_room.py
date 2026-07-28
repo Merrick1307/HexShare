@@ -31,6 +31,8 @@ class ExternalRoomGrantResponse(BaseModel):
     revoked_at: datetime | None = None
     expires_at: datetime | None = None
     granted_at: datetime
+    last_invited_at: datetime | None = None
+    resend_available_at: datetime | None = None
 
 
 class ExternalRoomInviteInspectionResponse(BaseModel):

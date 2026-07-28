@@ -49,6 +49,7 @@ from app.schemas.external_room import (
     ProvisionExternalRoomAccessResponse,
 )
 from app.schemas.pagination import PaginatedResponse
+from app.schemas.rooms import PlaceDocumentRequest
 from app.schemas.share import ShareLinkResponse
 from app.schemas.workspace import (
     ActivityItemResponse,
@@ -117,12 +118,17 @@ def build_router() -> APIRouter:
     async def list_documents(
         offset: int = Query(0, ge=0),
         limit: int = Query(20, ge=1, le=100),
+        query: Optional[str] = Query(None),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         document_service: DocumentService = Depends(get_document_service),
     ) -> PaginatedResponse[Document]:
-        docs = list(await document_service.list_accessible_documents(principal=principal))
-        total = len(docs)
-        return PaginatedResponse(items=docs[offset:offset + limit], total=total)
+        docs, total = await document_service.page_accessible_documents(
+            principal=principal,
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+        return PaginatedResponse(items=docs, total=total)
 
     @router.get("/documents/{document_id}", response_model=Document)
     async def get_document(
@@ -159,6 +165,28 @@ def build_router() -> APIRouter:
         except AccessDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc))
         except ValueError:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+    @router.patch("/documents/{document_id}/placement", response_model=Document)
+    async def place_document(
+        document_id: str,
+        payload: PlaceDocumentRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        document_service: DocumentService = Depends(get_document_service),
+    ) -> Document:
+        try:
+            return await document_service.place_document(
+                principal=principal,
+                document_id=document_id,
+                room_id=payload.room_id,
+                section_id=payload.section_id,
+                position=payload.position,
+            )
+        except AccessDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        except ValueError as exc:
+            if str(exc) == "section_not_found":
+                raise HTTPException(status_code=404, detail="Room section not found")
             raise HTTPException(status_code=404, detail="Document not found")
 
     @router.delete(

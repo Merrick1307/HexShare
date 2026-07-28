@@ -69,7 +69,11 @@ class NdaEventListener:
     async def handle_nda_accepted(self, tenant_id: str, payload: Dict[str, Any]) -> None:
         """Handle NDA accepted event."""
         recipient_email = payload.get("subject_email") or payload.get("recipient_email")
-        nda_title = payload.get("nda_policy_title") or payload.get("title")
+        nda_title = (
+            payload.get("nda_policy_title")
+            or payload.get("title")
+            or "NDA agreement"
+        )
 
         context = {
             "recipient_name": payload.get("typed_name") or payload.get("recipient_name", "User"),

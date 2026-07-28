@@ -191,6 +191,7 @@ async def lifespan(fastapi_app: FastAPI):
         document_service=document_service,
         link_service=link_service,
         nda_service=nda_service,
+        event_bus=event_bus,
     )
     external_room_viewer_service = ExternalRoomViewerService(
         storage=persistence_layer,
@@ -199,6 +200,7 @@ async def lifespan(fastapi_app: FastAPI):
         document_processor=document_processor,
         document_service=document_service,
         nda_service=nda_service,
+        event_bus=event_bus,
     )
 
     fastapi_app.state.pool = dp_pool

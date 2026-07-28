@@ -28,6 +28,7 @@ from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
+from app.core.watermark_identity import pseudonymous_watermark
 from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, ShareLink
 from app.ports.access_control import AccessDenied
 from app.schemas.nda import (
@@ -239,7 +240,6 @@ def build_router() -> APIRouter:
                 raise HTTPException(status_code=410, detail="This share link has expired")
             raise HTTPException(status_code=404, detail="Share link or document not found")
 
-        watermark = payload.email or claims.link_id
         return CreateViewSessionResponse(
             session_id=session.id,
             tenant_id=claims.tenant_id,
@@ -256,7 +256,11 @@ def build_router() -> APIRouter:
                 else None
             ),
             events_path=f"/api/v1/view-sessions/{session.id}/events",
-            watermark_text=f"HexShare - {watermark}",
+            watermark_text=pseudonymous_watermark(
+                session.id,
+                claims.link_id,
+                payload.email,
+            ),
             inline_view_supported=delivery.view_policy.inline_view_supported,
             view_kind=delivery.view_policy.view_kind,
             view_reason=delivery.view_policy.reason,

@@ -14,9 +14,10 @@ from app.ports.email_notification_port import EmailMessage
 class EmailTemplateLoader:
     """Load and render email templates."""
 
-    def __init__(self):
+    def __init__(self, *, brand_name: str = "HexShare"):
         base_dir = Path(__file__).resolve().parent.parent.parent
         templates_dir = base_dir / "templates" / "emails"
+        self._brand_name = brand_name.strip() or "HexShare"
 
         if not templates_dir.exists():
             raise RuntimeError(f"Email templates directory not found: {templates_dir}")
@@ -45,7 +46,10 @@ class EmailTemplateLoader:
         """
         try:
             template = self.env.get_template(template_name)
-            return template.render(**context)
+            rendered = template.render(**context)
+            if self._brand_name != "HexShare":
+                rendered = rendered.replace("HexShare", self._brand_name)
+            return rendered
         except TemplateNotFound as e:
             raise TemplateNotFound(f"Email template not found: {template_name}") from e
 

@@ -10,7 +10,9 @@ from app.domain import Document, ExternalRoomEvent, ExternalRoomEventType
 from app.ports.object_storage_port import ObjectStoragePort
 from app.ports.rendered_page_cache_port import RenderedPageCachePort
 from app.ports.storage_port import StoragePort
+from app.ports import EventBusPort
 from app.core.authz import ResourceAction
+from app.core.watermark_identity import pseudonymous_watermark
 from app.services.document_processor import (
     DocumentProcessingError,
     DocumentProcessor,
@@ -84,6 +86,7 @@ class ExternalRoomViewerService:
         document_processor: DocumentProcessor,
         document_service: DocumentService,
         nda_service: NdaService | None = None,
+        event_bus: EventBusPort | None = None,
     ) -> None:
         self._storage = storage
         self._object_storage = object_storage
@@ -91,6 +94,7 @@ class ExternalRoomViewerService:
         self._document_processor = document_processor
         self._document_service = document_service
         self._nda_service = nda_service
+        self._event_bus = event_bus
         self._content_cache = _BytesCache(maxsize=50, ttl_seconds=300.0)
 
     async def _enforce_nda(self, *, principal: ExternalRoomPrincipal, document: Document) -> None:
@@ -116,10 +120,12 @@ class ExternalRoomViewerService:
 
     @staticmethod
     def _build_watermark_text(*, principal: ExternalRoomPrincipal) -> str:
-        identifier = principal.email
-        if principal.display_name:
-            identifier = f"{principal.display_name} <{principal.email}>"
-        return f"HexShare - {identifier}"
+        return pseudonymous_watermark(
+            principal.session_id,
+            principal.external_party_id,
+            principal.email,
+            brand_name=principal.brand_name,
+        )
 
     def _build_processing_context(
         self,
@@ -229,6 +235,20 @@ class ExternalRoomViewerService:
                 timestamp=self._now(),
             )
         )
+        if self._event_bus:
+            await self._event_bus.publish_event(
+                principal.tenant_id,
+                "recipient.document_opened",
+                {
+                    "tenant_id": principal.tenant_id,
+                    "owner_user_id": document.created_by,
+                    "document_id": document.id,
+                    "room_id": principal.room_id,
+                    "external_party_id": principal.external_party_id,
+                    "visitor_session_id": principal.session_id,
+                    "occurred_at": self._now().isoformat(),
+                },
+            )
         return await self._describe_delivery(resolved=resolved)
 
     async def describe_view_session(
@@ -343,10 +363,41 @@ class ExternalRoomViewerService:
             required_permission=int(ResourceAction.EXPORT),
         )
         content = await self._read_object_cached(object_key=resolved.storage_key)
-        return await self._document_processor.process_for_download(
+        processed = await self._document_processor.process_for_download(
             context=self._build_processing_context(resolved=resolved, download=True),
             content=content,
         )
+        now = self._now()
+        await self._storage.save_external_room_event(
+            ExternalRoomEvent(
+                id=self._storage.generate_id("ere"),
+                tenant_id=principal.tenant_id,
+                external_room_session_id=principal.session_id,
+                room_id=principal.room_id,
+                event_type=ExternalRoomEventType.DOCUMENT_DOWNLOAD,
+                document_id=resolved.document_id,
+                timestamp=now,
+            )
+        )
+        if self._event_bus:
+            document = await self._document_service.get_document(
+                tenant_id=principal.tenant_id, document_id=resolved.document_id
+            )
+            if document:
+                await self._event_bus.publish_event(
+                    principal.tenant_id,
+                    "recipient.document_downloaded",
+                    {
+                        "tenant_id": principal.tenant_id,
+                        "owner_user_id": document.created_by,
+                        "document_id": document.id,
+                        "room_id": principal.room_id,
+                        "external_party_id": principal.external_party_id,
+                        "visitor_session_id": principal.session_id,
+                        "occurred_at": now.isoformat(),
+                    },
+                )
+        return processed
 
     async def close_view_session(
         self,

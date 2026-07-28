@@ -6,6 +6,7 @@ interface ConfirmDialogProps {
   isOpen: boolean;
   title: string;
   description: string;
+  error?: string | null;
   confirmLabel?: string;
   cancelLabel?: string;
   isConfirming?: boolean;
@@ -18,6 +19,7 @@ export function ConfirmDialog({
   isOpen,
   title,
   description,
+  error,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   isConfirming = false,
@@ -34,6 +36,14 @@ export function ConfirmDialog({
           </div>
           <p className="text-sm leading-relaxed text-zinc-600">{description}</p>
         </div>
+        {error ? (
+          <div
+            role="alert"
+            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
+            {error}
+          </div>
+        ) : null}
         <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
           <Button type="button" variant="outline" onClick={onCancel} disabled={isConfirming}>
             {cancelLabel}

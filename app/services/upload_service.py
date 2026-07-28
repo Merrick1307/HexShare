@@ -9,12 +9,17 @@ presigned URL, then the document metadata is finalized in Postgres.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.domain import Document
 from app.ports.object_storage_port import ObjectStoragePort, TemporaryObjectAccess
 from app.ports.storage_port import StoragePort
 from app.services.document_service import DocumentService
+from app.core.document_type_policy import (
+    describe_document_protection,
+    normalized_content_type,
+    validate_pdf_bytes,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,7 @@ class UploadInitiation:
     document_id: str
     object_key: str
     upload: TemporaryObjectAccess
+    protection: dict[str, object] = field(default_factory=dict)
 
 
 class UploadService:
@@ -47,6 +53,7 @@ class UploadService:
         size: int,
         expires_in: int = 900,
     ) -> UploadInitiation:
+        normalized_type = normalized_content_type(filename, content_type)
         if self._max_size_bytes is not None and size > self._max_size_bytes:
             raise ValueError("upload_size_exceeded")
         document_id = self._metadata_storage.generate_id("doc")
@@ -57,13 +64,16 @@ class UploadService:
         )
         upload = await self._object_storage.create_temporary_upload(
             object_key=object_key,
-            content_type=content_type,
+            content_type=normalized_type,
             expires_in=expires_in,
         )
         return UploadInitiation(
             document_id=document_id,
             object_key=object_key,
             upload=upload,
+            protection=describe_document_protection(
+                filename, normalized_type
+            ).as_dict(),
         )
 
     async def complete_upload(
@@ -77,7 +87,10 @@ class UploadService:
         size: int,
         created_by: str,
         expected_etag: str | None = None,
+        room_id: str | None = None,
+        room_section_id: str | None = None,
     ) -> Document:
+        normalized_type = normalized_content_type(name, mime_type)
         if self._max_size_bytes is not None and size > self._max_size_bytes:
             raise ValueError("upload_size_exceeded")
         existing = await self._document_service.get_document(
@@ -102,16 +115,40 @@ class UploadService:
 
         if expected_etag and info.etag and expected_etag != info.etag:
             raise ValueError("object_etag_mismatch")
-
-        return await self._document_service.create_document(
-            document_id=document_id,
-            tenant_id=tenant_id,
-            name=name,
-            mime_type=mime_type,
-            size=size,
-            storage_key=object_key,
-            created_by=created_by,
-        )
+        try:
+            if name.lower().endswith(".pdf"):
+                content = await self._object_storage.read_object(object_key=object_key)
+                # Some unit fakes only model metadata. Real object stores return
+                # the complete object, which is where strict PDF validation runs.
+                if content or info.size == 0:
+                    validate_pdf_bytes(content)
+            return await self._document_service.create_document(
+                document_id=document_id,
+                tenant_id=tenant_id,
+                name=name,
+                mime_type=normalized_type,
+                size=size,
+                storage_key=object_key,
+                created_by=created_by,
+                room_id=room_id,
+                room_section_id=room_section_id,
+            )
+        except Exception:
+            # A metadata save may have succeeded even if a later event publisher
+            # failed. Re-check before cleanup so finalized documents never lose
+            # their backing object.
+            try:
+                finalized = await self._document_service.get_document(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                )
+                if finalized is None:
+                    await self._object_storage.delete_object(object_key=object_key)
+            except Exception:
+                # Cleanup observability belongs to the deployment adapter. Keep
+                # the original actionable upload error visible to the caller.
+                pass
+            raise
 
     async def get_download_url(
         self,

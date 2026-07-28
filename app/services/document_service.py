@@ -49,6 +49,7 @@ class DocumentService:
         created_by: str,
         document_id: str | None = None,
         room_id: str | None = None,
+        room_section_id: str | None = None,
     ) -> Document:
         """Create a new document record.
 
@@ -71,6 +72,8 @@ class DocumentService:
             created_at=now,
             created_by=created_by,
             room_id=room_id,
+            room_section_id=room_section_id,
+            room_position=0,
         )
         await self._storage.save_document(document)
 
@@ -159,6 +162,24 @@ class DocumentService:
             required_permission=int(required),
         )
 
+    async def page_accessible_documents(
+        self,
+        *,
+        principal: TenantPrincipal,
+        query: str | None,
+        offset: int,
+        limit: int,
+        required: ResourceAction = ResourceAction.READ,
+    ) -> tuple[list[Document], int]:
+        return await self._storage.page_ungrouped_documents_by_permission(
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            required_permission=int(required),
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+
     async def delete_document(
         self, *, principal: TenantPrincipal, document_id: str
     ) -> None:
@@ -229,5 +250,34 @@ class DocumentService:
             room_id=group_id,
         )
         if not updated:
+            raise ValueError("document_not_found")
+        return updated
+
+    async def place_document(
+        self,
+        *,
+        principal: TenantPrincipal,
+        document_id: str,
+        room_id: str,
+        section_id: str | None,
+        position: int | None,
+    ) -> Document:
+        await self.require_document_access(
+            principal=principal,
+            document_id=document_id,
+            required=ResourceAction.MANAGE,
+        )
+        if not self._principal_has_room_permission(
+            principal, room_id, ResourceAction.WRITE
+        ):
+            raise AccessDenied("insufficient_target_group_permission")
+        updated = await self._storage.place_room_document(
+            tenant_id=principal.tenant_id,
+            document_id=document_id,
+            room_id=room_id,
+            section_id=section_id,
+            position=position,
+        )
+        if updated is None:
             raise ValueError("document_not_found")
         return updated

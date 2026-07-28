@@ -6,6 +6,7 @@ import pytest
 
 from app.adapters import MemoryStorage
 from app.core.authz import ResourceAction
+from app.core.watermark_identity import pseudonymous_watermark
 from app.domain import Document, DocumentGroup
 from app.ports.object_storage_port import ObjectDescriptor, ObjectStoragePort, ObjectWriteRequest, TemporaryObjectAccess
 from app.ports.rendered_page_cache_port import RenderedPageCachePort
@@ -205,8 +206,11 @@ async def test_stream_and_download_apply_external_room_watermark():
     assert object_storage.read_requests == ["documents/doc_2/notes.txt"]
     assert len(processor.view_calls) == 1
     assert len(processor.download_calls) == 1
-    assert processor.view_calls[0][0].watermark_text == "HexShare - Viewer Name <viewer@example.com>"
-    assert processor.download_calls[0][0].watermark_text == "HexShare - Viewer Name <viewer@example.com>"
+    expected_watermark = pseudonymous_watermark(
+        "ers_1", "ep_1", "viewer@example.com"
+    )
+    assert processor.view_calls[0][0].watermark_text == expected_watermark
+    assert processor.download_calls[0][0].watermark_text == expected_watermark
 
 
 @pytest.mark.asyncio

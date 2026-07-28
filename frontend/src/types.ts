@@ -13,10 +13,23 @@ export interface Document {
   created_at: string;
   created_by: string;
   room_id?: string | null;
+  room_section_id?: string | null;
+  room_position: number;
+  protection: DocumentProtection;
   upload_status?: string;
   object_etag?: string | null;
   checksum_sha256?: string | null;
   uploaded_at?: string | null;
+}
+
+export interface DocumentProtection {
+  profile: 'strongest' | 'protected_preview' | 'download_only';
+  label: string;
+  inline_view_supported: boolean;
+  watermark_mode: string | null;
+  page_activity: boolean;
+  download_required: boolean;
+  reason: string | null;
 }
 
 export interface ShareLink {
@@ -98,6 +111,17 @@ export interface DocumentGroup {
   created_at: string;
 }
 
+export interface RoomSection {
+  id: string;
+  tenant_id: string;
+  room_id: string;
+  name: string;
+  position: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ExternalRoomGrant {
   grant_id: string;
   external_party_id: string;
@@ -109,6 +133,22 @@ export interface ExternalRoomGrant {
   revoked_at: string | null;
   expires_at: string | null;
   granted_at: string;
+  last_invited_at: string | null;
+  resend_available_at: string | null;
+}
+
+export interface ReissuedInvitation {
+  grant_id: string;
+  invite_path: string;
+  invite_expires_at: string;
+  email_sent: boolean;
+  resend_available_at: string;
+}
+
+export interface NotificationPreferences {
+  document_open_email: boolean;
+  document_download_email: boolean;
+  nda_accepted_email: boolean;
 }
 
 export interface ProvisionExternalRoomAccessResponse {
@@ -191,6 +231,7 @@ export interface WorkspaceSummary {
   active_links: number;
   external_recipients: number;
   document_opens: number;
+  onboarding_complete: boolean;
 }
 
 export interface ActivityItem {

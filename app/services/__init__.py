@@ -19,6 +19,7 @@ from .external_room_access_service import (
     ExternalRoomPrincipal,
     ExternalRoomSessionTokens,
     ProvisionedRoomAccess,
+    ReissuedRoomInvitation,
 )
 from .external_room_viewer_service import (
     ExternalRoomDocumentSessionDelivery,
@@ -48,6 +49,7 @@ __all__ = [
     "PdfPreview",
     "ProcessedDocument",
     "ProvisionedRoomAccess",
+    "ReissuedRoomInvitation",
     "ProcessingContext",
     "RenderedPage",
     "UploadService",

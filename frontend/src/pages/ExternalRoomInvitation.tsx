@@ -17,6 +17,7 @@ import {
   ExternalRoomContext,
   ExternalRoomInviteInspection,
   NdaStatus,
+  RoomSection,
 } from "../types";
 import { formatBytes } from "../lib/utils";
 import {
@@ -31,6 +32,7 @@ import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { NdaGate } from "../components/NdaGate";
 import { HexLogo } from "../components/ui/HexLogo";
+import { FileTypeIcon } from "../components/FileTypeIcon";
 
 export type ExternalRoomInvitationProps = {
   brandName?: string;
@@ -47,6 +49,7 @@ export function ExternalRoomInvitation({
     useState<ExternalRoomInviteInspection | null>(null);
   const [context, setContext] = useState<ExternalRoomContext | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [sections, setSections] = useState<RoomSection[]>([]);
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -64,8 +67,14 @@ export function ExternalRoomInvitation({
       // The room-level NDA blocks the document list until accepted.
       if (nextContext.nda?.required && !nextContext.nda.accepted) {
         setDocuments([]);
+        setSections([]);
       } else {
-        setDocuments(await api.listExternalRoomDocuments());
+        const [nextDocuments, nextSections] = await Promise.all([
+          api.listExternalRoomDocuments(),
+          api.listExternalRoomSections(),
+        ]);
+        setDocuments(nextDocuments);
+        setSections(nextSections);
       }
       return nextContext;
     }, []);
@@ -230,6 +239,23 @@ export function ExternalRoomInvitation({
     () => `${documents.length} document${documents.length === 1 ? "" : "s"}`,
     [documents.length],
   );
+  const documentBuckets = useMemo(() => {
+    const ordered = sections
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((section) => ({
+        id: section.id as string | null,
+        name: section.name,
+        documents: documents
+          .filter((document) => document.room_section_id === section.id)
+          .sort((a, b) => a.room_position - b.room_position),
+      }));
+    const unsectioned = documents
+      .filter((document) => !document.room_section_id)
+      .sort((a, b) => a.room_position - b.room_position);
+    if (unsectioned.length) ordered.push({ id: null, name: 'Unsectioned', documents: unsectioned });
+    return ordered.filter((bucket) => bucket.documents.length > 0);
+  }, [documents, sections]);
   const currentStep = !context
     ? 0
     : context.nda?.required && !context.nda.accepted
@@ -413,12 +439,12 @@ export function ExternalRoomInvitation({
                       <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#4a3fe0] dark:text-[#a8a2ff]">
                         Shared with you
                       </p>
-                      <CardTitle className="text-[#101522] dark:text-[#f3f1eb]">
+                      <CardTitle className="mt-2 text-[#101522] dark:text-[#f3f1eb]">
                         {context.room_name}
                       </CardTitle>
-                      <CardDescription className="text-[#626976] dark:text-zinc-400">
-                        Verified as {context.display_name || context.email}.
-                        Access remains tied to this room and recipient identity.
+                      <CardDescription className="mt-3 space-y-1 leading-6 text-[#626976] dark:text-zinc-400">
+                        <span className="block">Verified as {context.display_name || context.email}.</span>
+                        <span className="block">Access remains tied to this room and recipient identity.</span>
                       </CardDescription>
                     </div>
                     <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#f0eeff] text-[#6657ff] dark:bg-[#6657ff]/15">
@@ -506,26 +532,33 @@ export function ExternalRoomInvitation({
                       No documents are currently visible in this room.
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {documents.map((document) => (
+                    <div className="space-y-5">
+                      {documentBuckets.map((bucket) => (
+                        <section key={bucket.id || 'unsectioned'} className="space-y-2">
+                          <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[#626976] dark:text-zinc-400">{bucket.name}</h3>
+                          {bucket.documents.map((document) => (
                         <div
                           key={document.id}
                           className="flex flex-col gap-4 rounded-xl border border-black/10 bg-[#efedf7]/45 p-4 transition-colors hover:border-[#6657ff]/35 dark:border-white/10 dark:bg-white/[0.035] md:flex-row md:items-center md:justify-between"
                         >
-                          <div className="min-w-0 space-y-1">
-                            <p className="truncate font-medium text-[#101522] dark:text-[#f3f1eb]">
-                              {document.name}
-                            </p>
-                            <div className="flex flex-wrap gap-3 text-xs text-[#7a808a] dark:text-zinc-500">
-                              <span>{document.mime_type}</span>
-                              <span>{formatBytes(document.size)}</span>
-                              <span>
-                                Uploaded{" "}
-                                {format(
-                                  new Date(document.created_at),
-                                  "MMM d, yyyy",
-                                )}
-                              </span>
+                          <div className="flex min-w-0 items-start gap-3">
+                            <FileTypeIcon fileName={document.name} mimeType={document.mime_type} />
+                            <div className="min-w-0 space-y-1">
+                              <p className="truncate font-medium text-[#101522] dark:text-[#f3f1eb]">
+                                {document.name}
+                              </p>
+                              <div className="flex flex-wrap gap-3 text-xs text-[#7a808a] dark:text-zinc-500">
+                                <span>{document.mime_type}</span>
+                                <span>{formatBytes(document.size)}</span>
+                                <span>{document.protection?.label}</span>
+                                <span>
+                                  Uploaded{" "}
+                                  {format(
+                                    new Date(document.created_at),
+                                    "MMM d, yyyy",
+                                  )}
+                                </span>
+                              </div>
                             </div>
                           </div>
                           <div className="flex gap-2">
@@ -561,6 +594,8 @@ export function ExternalRoomInvitation({
                             )}
                           </div>
                         </div>
+                          ))}
+                        </section>
                       ))}
                     </div>
                   )}

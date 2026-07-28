@@ -1,25 +1,30 @@
-import type { FormEvent } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   ArrowLeft,
+  ArrowDown,
+  ArrowUp,
   Copy,
   ExternalLink,
   FileText,
   Folder,
   FolderOutput,
   Mail,
+  Home,
   Search,
   Shield,
   Trash2,
   Upload,
   UserPlus,
+  Plus,
+  Pencil,
   ChevronLeft,
   ChevronRight,
+  Users,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { Document, DocumentGroup, ExternalRoomGrant, ProvisionExternalRoomAccessResponse } from '../types';
+import { Document, DocumentGroup, ExternalRoomGrant, ProvisionExternalRoomAccessResponse, RoomSection } from '../types';
 import { formatBytes } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -27,6 +32,8 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { NdaAdminPanel } from '../components/NdaAdminPanel';
+import { UploadQueue } from '../components/UploadQueue';
+import { FileTypeIcon } from '../components/FileTypeIcon';
 
 type WorkspaceUser = { id: string; user_id?: string; email?: string; name?: string; username?: string };
 
@@ -36,16 +43,19 @@ function statusForGrant(grant: ExternalRoomGrant) {
   return { label: 'Active', variant: 'success' as const };
 }
 
-export function GroupDetails() {
+type RoomAdminTab = 'home' | 'documents' | 'external-parties';
+
+export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: boolean } = {}) {
   const { id } = useParams<{ id: string }>();
   const [group, setGroup] = useState<DocumentGroup | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [sections, setSections] = useState<RoomSection[]>([]);
   const [externalAccess, setExternalAccess] = useState<ExternalRoomGrant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSectionId, setUploadSectionId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [isExternalAccessModalOpen, setIsExternalAccessModalOpen] = useState(false);
@@ -68,25 +78,49 @@ export function GroupDetails() {
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
   const [revokeAccessTarget, setRevokeAccessTarget] = useState<ExternalRoomGrant | null>(null);
   const [removeDocumentTarget, setRemoveDocumentTarget] = useState<Document | null>(null);
+  const [revokeAccessError, setRevokeAccessError] = useState<string | null>(null);
+  const [removeDocumentError, setRemoveDocumentError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<RoomAdminTab>('home');
+  const [sectionEditor, setSectionEditor] = useState<{ mode: 'create' | 'rename'; section?: RoomSection } | null>(null);
+  const [sectionName, setSectionName] = useState('');
+  const [sectionEditorError, setSectionEditorError] = useState<string | null>(null);
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState<RoomSection | null>(null);
+  const [deleteSectionError, setDeleteSectionError] = useState<string | null>(null);
+  const [rotateInvitationTarget, setRotateInvitationTarget] = useState<{
+    grant: ExternalRoomGrant;
+    delivery: 'email' | 'return_link';
+  } | null>(null);
+  const [rotateInvitationError, setRotateInvitationError] = useState<string | null>(null);
   const PAGE_SIZE = 10;
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (
+    { showLoading = true }: { showLoading?: boolean } = {},
+  ) => {
     if (!id) return;
-    setIsLoading(true);
-    setError(null);
+    if (showLoading) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
-      const [groupData, docs, grants] = await Promise.all([
+      const [groupData, docs, grants, roomSections] = await Promise.all([
         api.getGroup(id),
         api.listGroupDocuments(id),
         api.listExternalRoomAccess(id),
+        api.listRoomSections(id),
       ]);
       setGroup(groupData);
       setDocuments(docs);
       setExternalAccess(grants);
+      setSections(roomSections);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load room');
+      const message = err instanceof Error ? err.message : 'Failed to load room';
+      if (showLoading) {
+        setError(message);
+      } else {
+        setSuccessMessage(`Upload completed, but the room could not be refreshed: ${message}`);
+      }
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   }, [id]);
 
@@ -148,41 +182,6 @@ export function GroupDetails() {
     setIsExternalAccessModalOpen(true);
   }
 
-  async function handleUpload(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!id) return;
-    setUploadError(null);
-    setIsSubmitting(true);
-
-    const formData = new FormData(e.currentTarget);
-    const file = formData.get('file') as File | null;
-
-    if (!file) {
-      setUploadError('Select a file first.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    try {
-      const uploadInit = await api.initiateUpload(file);
-      await api.uploadFileDirect(file, uploadInit);
-      await api.createDocumentInGroup(id, {
-        name: file.name,
-        mime_type: file.type || 'application/octet-stream',
-        size: file.size,
-        storage_key: uploadInit.object_key,
-      });
-      setIsUploadModalOpen(false);
-      e.currentTarget.reset();
-      setSuccessMessage('Document uploaded successfully.');
-      await loadData();
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Failed to upload');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
   async function handleAddMember() {
     if (!id || !memberUserId.trim()) return;
     setMemberError(null);
@@ -227,14 +226,14 @@ export function GroupDetails() {
   async function handleRevokeExternalAccess() {
     if (!id || !revokeAccessTarget) return;
     setIsSubmitting(true);
-    setError(null);
+    setRevokeAccessError(null);
     try {
       await api.revokeExternalRoomAccess(id, revokeAccessTarget.grant_id);
       setSuccessMessage('External room access revoked.');
       setRevokeAccessTarget(null);
       setExternalAccess(await api.listExternalRoomAccess(id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to revoke external access');
+      setRevokeAccessError(err instanceof Error ? err.message : 'Failed to revoke external access');
     } finally {
       setIsSubmitting(false);
     }
@@ -243,13 +242,14 @@ export function GroupDetails() {
   async function handleRemoveFromGroup() {
     if (!removeDocumentTarget) return;
     setIsSubmitting(true);
+    setRemoveDocumentError(null);
     try {
       await api.moveDocumentToGroup(removeDocumentTarget.id, null);
       setSuccessMessage('Document removed from room.');
       setRemoveDocumentTarget(null);
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove document from room');
+      setRemoveDocumentError(err instanceof Error ? err.message : 'Failed to remove document from room');
     } finally {
       setIsSubmitting(false);
     }
@@ -259,6 +259,136 @@ export function GroupDetails() {
     await navigator.clipboard.writeText(value);
     setCopiedValue(value);
     window.setTimeout(() => setCopiedValue(null), 1500);
+  }
+
+  function openCreateSection() {
+    setSectionName('');
+    setSectionEditorError(null);
+    setSectionEditor({ mode: 'create' });
+  }
+
+  function openRenameSection(section: RoomSection) {
+    setSectionName(section.name);
+    setSectionEditorError(null);
+    setSectionEditor({ mode: 'rename', section });
+  }
+
+  async function saveSection() {
+    if (!id || !sectionEditor || isSubmitting) return;
+    const name = sectionName.trim();
+    if (!name) {
+      setSectionEditorError('Enter a section name.');
+      return;
+    }
+    if (sectionEditor.mode === 'rename' && name === sectionEditor.section?.name) {
+      setSectionEditor(null);
+      return;
+    }
+    setIsSubmitting(true);
+    setSectionEditorError(null);
+    try {
+      if (sectionEditor.mode === 'create') {
+        await api.createRoomSection(id, name.trim());
+        setSuccessMessage('Section added.');
+      } else if (sectionEditor.section) {
+        await api.renameRoomSection(id, sectionEditor.section.id, name);
+        setSuccessMessage('Section renamed.');
+      }
+      setSections(await api.listRoomSections(id));
+      setSectionEditor(null);
+    } catch (err) {
+      setSectionEditorError(err instanceof Error ? err.message : 'Failed to save section');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function deleteSection() {
+    if (!id || !deleteSectionTarget) return;
+    setIsSubmitting(true);
+    setDeleteSectionError(null);
+    try {
+      await api.deleteRoomSection(id, deleteSectionTarget.id);
+      setDeleteSectionTarget(null);
+      await loadData();
+      setSuccessMessage('Section deleted; its documents are now Unsectioned.');
+    } catch (err) {
+      setDeleteSectionError(err instanceof Error ? err.message : 'Failed to delete section');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function moveSection(section: RoomSection, direction: -1 | 1) {
+    if (!id) return;
+    const ordered = [...sections].sort((a, b) => a.position - b.position);
+    const index = ordered.findIndex((item) => item.id === section.id);
+    const next = index + direction;
+    if (next < 0 || next >= ordered.length) return;
+    [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+    try {
+      setSections(await api.reorderRoomSections(id, ordered.map((item) => item.id)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reorder sections');
+    }
+  }
+
+  async function moveDocumentToSection(document: Document, sectionId: string | null) {
+    if (!id) return;
+    try {
+      await api.placeDocument(document.id, id, sectionId);
+      await loadData();
+      setSuccessMessage('Document moved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move document');
+    }
+  }
+
+  async function moveDocumentWithinSection(document: Document, direction: -1 | 1) {
+    if (!id) return;
+    const peers = documents
+      .filter((item) => (item.room_section_id || null) === (document.room_section_id || null))
+      .sort((a, b) => a.room_position - b.room_position);
+    const index = peers.findIndex((item) => item.id === document.id);
+    const next = index + direction;
+    if (next < 0 || next >= peers.length) return;
+    [peers[index], peers[next]] = [peers[next], peers[index]];
+    try {
+      await api.reorderRoomDocuments(id, document.room_section_id || null, peers.map((item) => item.id));
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reorder documents');
+    }
+  }
+
+  async function rotateInvitation(grant: ExternalRoomGrant, delivery: 'email' | 'return_link') {
+    if (!id) return;
+    setIsSubmitting(true);
+    setRotateInvitationError(null);
+    try {
+      const result = await api.reissueExternalRoomInvitation(id, grant.grant_id, delivery);
+      if (delivery === 'return_link') {
+        await copyToClipboard(api.toAbsoluteFrontendUrl(result.invite_path));
+        setSuccessMessage('A fresh invitation link was copied. The previous invitation link is now invalid.');
+      } else {
+        if (result.email_sent) {
+          setSuccessMessage('Invitation resent. The previous invitation link is now invalid.');
+        } else {
+          try {
+            await copyToClipboard(api.toAbsoluteFrontendUrl(result.invite_path));
+            setSuccessMessage('Email delivery failed, so the fresh invitation link was copied instead.');
+          } catch {
+            setError('The invitation was rotated, but email delivery and automatic copying failed.');
+          }
+        }
+      }
+      setExternalAccess(await api.listExternalRoomAccess(id));
+      setRotateInvitationTarget(null);
+    } catch (err) {
+      setRotateInvitationError(err instanceof Error ? err.message : 'Failed to rotate invitation');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   if (isLoading) {
@@ -296,7 +426,7 @@ export function GroupDetails() {
             {group.description && <p className="mt-1 text-sm text-zinc-500">{group.description}</p>}
           </div>
         </div>
-        <div className="flex flex-wrap gap-3">
+        {!tabbedAdminView ? <div className="flex flex-wrap gap-3">
           <Button variant="outline" onClick={openMemberModal} className="gap-2">
             <UserPlus className="h-4 w-4" />
             Add Member
@@ -305,18 +435,81 @@ export function GroupDetails() {
             <Mail className="h-4 w-4" />
             Invite External
           </Button>
-          <Button onClick={() => setIsUploadModalOpen(true)} className="gap-2">
+          <Button onClick={() => { setUploadSectionId(''); setIsUploadModalOpen(true); }} className="gap-2">
             <Upload className="h-4 w-4" />
             Upload to Room
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
 
-      {id ? <NdaAdminPanel scope="room" id={id} /> : null}
+      {tabbedAdminView ? (
+        <div className="border-b border-zinc-200">
+          <div className="-mb-px flex gap-6" role="tablist" aria-label="Room administration">
+            {([
+              { id: 'home', label: 'Home', icon: Home },
+              { id: 'documents', label: 'Documents', icon: FileText },
+              { id: 'external-parties', label: 'External Parties', icon: Users },
+            ] as const).map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`inline-flex items-center gap-2 border-b-2 px-1 pb-3 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'border-indigo-600 text-indigo-700'
+                      : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'
+                  }`}
+                >
+                  <tab.icon className="h-4 w-4" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
-      {latestProvision && latestInviteUrl ? (
+      {(!tabbedAdminView || activeTab === 'home') ? (
+        <div className="space-y-6" role={tabbedAdminView ? 'tabpanel' : undefined}>
+          {tabbedAdminView ? (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+                  <p className="text-sm text-zinc-500">Documents</p>
+                  <p className="mt-2 text-2xl font-semibold text-zinc-950">{documents.length}</p>
+                </div>
+                <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+                  <p className="text-sm text-zinc-500">Sections</p>
+                  <p className="mt-2 text-2xl font-semibold text-zinc-950">{sections.length}</p>
+                </div>
+                <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+                  <p className="text-sm text-zinc-500">Active external parties</p>
+                  <p className="mt-2 text-2xl font-semibold text-zinc-950">{activeExternalAccessCount}</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-semibold text-zinc-950">Internal room access</h2>
+                  <p className="mt-1 text-sm text-zinc-500">Add a workspace member who should help manage this room.</p>
+                </div>
+                <Button variant="outline" onClick={openMemberModal} className="shrink-0 gap-2">
+                  <UserPlus className="h-4 w-4" />
+                  Add Member
+                </Button>
+              </div>
+            </>
+          ) : null}
+          {id ? <NdaAdminPanel scope="room" id={id} /> : null}
+        </div>
+      ) : null}
+
+      {(!tabbedAdminView || activeTab === 'external-parties') && latestProvision && latestInviteUrl ? (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-4 text-sm text-indigo-900">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-1">
@@ -340,65 +533,87 @@ export function GroupDetails() {
         </div>
       ) : null}
 
-      <div className="overflow-visible rounded-xl border border-zinc-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
-            <tr>
-              <th className="px-6 py-4">Name</th>
-              <th className="px-6 py-4">Size</th>
-              <th className="px-6 py-4">Uploaded</th>
-              <th className="px-6 py-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-200">
-            {documents.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-6 py-12 text-center text-zinc-500">
-                  <div className="flex flex-col items-center justify-center">
-                    <FileText className="mb-3 h-10 w-10 text-zinc-300" />
-                    <p className="text-base font-medium text-zinc-900">No documents in this room</p>
-                    <p className="mt-1 text-sm">Upload a document to get started.</p>
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              documents.map((doc) => (
-                <tr key={doc.id} className="group transition-colors hover:bg-zinc-50/50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                        <FileText className="h-5 w-5" />
+      {(!tabbedAdminView || activeTab === 'documents') ? <div className="space-y-4" role={tabbedAdminView ? 'tabpanel' : undefined}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-950">Room documents</h2>
+            <p className="text-sm text-zinc-500">Sections and document order are shown to recipients exactly as arranged here.</p>
+          </div>
+          <div className="flex gap-2">
+            {tabbedAdminView ? (
+              <Button type="button" size="sm" onClick={() => { setUploadSectionId(''); setIsUploadModalOpen(true); }}>
+                <Upload className="mr-2 h-4 w-4" /> Upload
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" size="sm" onClick={openCreateSection}>
+              <Plus className="mr-2 h-4 w-4" /> Add section
+            </Button>
+          </div>
+        </div>
+        {documents.length === 0 && sections.length === 0 ? (
+          <div className="rounded-xl border border-zinc-200 bg-white px-6 py-12 text-center text-zinc-500 shadow-sm">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-zinc-300" />
+            <p className="text-base font-medium text-zinc-900">No documents in this room</p>
+            <p className="mt-1 text-sm">Add a section or upload documents to get started.</p>
+          </div>
+        ) : null}
+        {[...sections.map((section) => ({ id: section.id, name: section.name, section })), { id: null, name: 'Unsectioned', section: null }].map((bucket) => {
+          const bucketDocuments = documents
+            .filter((document) => (document.room_section_id || null) === bucket.id)
+            .sort((a, b) => a.room_position - b.room_position);
+          if (!bucket.section && bucketDocuments.length === 0) return null;
+          return (
+            <section key={bucket.id || 'unsectioned'} className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                <div>
+                  <h3 className="font-medium text-zinc-900">{bucket.name}</h3>
+                  <p className="text-xs text-zinc-500">{bucketDocuments.length} document{bucketDocuments.length === 1 ? '' : 's'}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setUploadSectionId(bucket.id || ''); setIsUploadModalOpen(true); }}>
+                    <Upload className="mr-2 h-4 w-4" /> Upload here
+                  </Button>
+                  {bucket.section ? (
+                    <>
+                      <button type="button" title="Move section up" onClick={() => void moveSection(bucket.section!, -1)} className="rounded p-2 text-zinc-500 hover:bg-white"><ArrowUp className="h-4 w-4" /></button>
+                      <button type="button" title="Move section down" onClick={() => void moveSection(bucket.section!, 1)} className="rounded p-2 text-zinc-500 hover:bg-white"><ArrowDown className="h-4 w-4" /></button>
+                      <button type="button" title="Rename section" onClick={() => openRenameSection(bucket.section!)} className="rounded p-2 text-zinc-500 hover:bg-white"><Pencil className="h-4 w-4" /></button>
+                      <button type="button" title="Delete section" onClick={() => { setDeleteSectionError(null); setDeleteSectionTarget(bucket.section!); }} className="rounded p-2 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              {bucketDocuments.length === 0 ? <p className="px-4 py-6 text-center text-sm text-zinc-400">No documents in this section.</p> : (
+                <ul className="divide-y divide-zinc-100">
+                  {bucketDocuments.map((doc, index) => (
+                    <li key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} size="sm" />
+                      <div className="min-w-0 flex-1">
+                        <Link to={`/documents/${doc.id}`} className="truncate font-medium text-zinc-900 hover:text-indigo-600 hover:underline">{doc.name}</Link>
+                        <p className="text-xs text-zinc-500">{formatBytes(doc.size)} · {doc.protection?.label} · {format(new Date(doc.created_at), 'MMM d, yyyy')}</p>
                       </div>
-                      <div>
-                        <Link to={`/documents/${doc.id}`} className="font-medium text-zinc-900 hover:text-indigo-600 hover:underline">
-                          {doc.name}
-                        </Link>
-                        <p className="mt-0.5 text-xs text-zinc-500">{doc.mime_type}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-zinc-600">{formatBytes(doc.size)}</td>
-                  <td className="px-6 py-4 text-zinc-600">{format(new Date(doc.created_at), 'MMM d, yyyy')}</td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setRemoveDocumentTarget(doc)}
-                      disabled={isSubmitting}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50"
-                      title="Remove from room"
-                    >
-                      <FolderOutput className="h-4 w-4" />
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                      <select
+                        aria-label={`Move ${doc.name} to section`}
+                        className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs"
+                        value={doc.room_section_id || ''}
+                        onChange={(event) => void moveDocumentToSection(doc, event.target.value || null)}
+                      >
+                        <option value="">Unsectioned</option>
+                        {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+                      </select>
+                      <button type="button" disabled={index === 0} title="Move document up" onClick={() => void moveDocumentWithinSection(doc, -1)} className="rounded p-1.5 text-zinc-500 disabled:opacity-30"><ArrowUp className="h-4 w-4" /></button>
+                      <button type="button" disabled={index === bucketDocuments.length - 1} title="Move document down" onClick={() => void moveDocumentWithinSection(doc, 1)} className="rounded p-1.5 text-zinc-500 disabled:opacity-30"><ArrowDown className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => { setRemoveDocumentError(null); setRemoveDocumentTarget(doc); }} title="Remove from room" className="rounded p-1.5 text-zinc-500 hover:text-red-600"><FolderOutput className="h-4 w-4" /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div> : null}
 
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm">
+      {(!tabbedAdminView || activeTab === 'external-parties') ? <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" role={tabbedAdminView ? 'tabpanel' : undefined}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-5">
           <div>
             <div className="flex items-center gap-3">
@@ -466,11 +681,37 @@ export function GroupDetails() {
                         <Badge variant={status.variant}>{status.label}</Badge>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        {!grant.revoked_at ? (
-                          <Button type="button" variant="outline" size="sm" onClick={() => setRevokeAccessTarget(grant)}>
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Revoke
-                          </Button>
+                        {status.label === 'Active' ? (
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!!grant.resend_available_at && new Date(grant.resend_available_at) > new Date()}
+                              title={grant.resend_available_at ? `Available ${format(new Date(grant.resend_available_at), 'MMM d, h:mm a')}` : undefined}
+                              onClick={() => {
+                                setRotateInvitationError(null);
+                                setRotateInvitationTarget({ grant, delivery: 'email' });
+                              }}
+                            >
+                              <Mail className="mr-2 h-4 w-4" /> Resend
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!!grant.resend_available_at && new Date(grant.resend_available_at) > new Date()}
+                              onClick={() => {
+                                setRotateInvitationError(null);
+                                setRotateInvitationTarget({ grant, delivery: 'return_link' });
+                              }}
+                            >
+                              <Copy className="mr-2 h-4 w-4" /> Copy invitation
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" onClick={() => { setRevokeAccessError(null); setRevokeAccessTarget(grant); }}>
+                              <Trash2 className="mr-2 h-4 w-4" /> Revoke
+                            </Button>
+                          </div>
                         ) : null}
                       </td>
                     </tr>
@@ -480,20 +721,127 @@ export function GroupDetails() {
             </tbody>
           </table>
         </div>
-      </div>
+      </div> : null}
 
-      <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="Upload to Room">
-        <form onSubmit={handleUpload} className="space-y-6">
-          {uploadError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{uploadError}</div>}
+      <Modal
+        isOpen={sectionEditor !== null}
+        onClose={() => {
+          setSectionEditor(null);
+          setSectionEditorError(null);
+        }}
+        title={sectionEditor?.mode === 'rename' ? 'Rename section' : 'Add section'}
+      >
+        <div className="space-y-5">
+          {sectionEditorError ? (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {sectionEditorError}
+            </div>
+          ) : null}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-900">Select File</label>
-            <Input type="file" name="file" required />
+            <label htmlFor="room-section-name" className="text-sm font-medium text-zinc-900">Section name</label>
+            <Input
+              id="room-section-name"
+              autoFocus
+              maxLength={120}
+              value={sectionName}
+              onChange={(event) => setSectionName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void saveSection();
+              }}
+              placeholder="Financials"
+            />
           </div>
           <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
-            <Button type="button" variant="outline" onClick={() => setIsUploadModalOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Uploading...' : 'Upload'}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSubmitting}
+              onClick={() => {
+                setSectionEditor(null);
+                setSectionEditorError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="button" disabled={isSubmitting} onClick={() => void saveSection()}>
+              {isSubmitting ? 'Saving...' : 'Save section'}
+            </Button>
           </div>
-        </form>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        isOpen={deleteSectionTarget !== null}
+        title="Delete section"
+        description={
+          deleteSectionTarget
+            ? `Delete "${deleteSectionTarget.name}"? Its documents will move to Unsectioned.`
+            : ''
+        }
+        confirmLabel="Delete section"
+        error={deleteSectionError}
+        isConfirming={isSubmitting}
+        onCancel={() => {
+          setDeleteSectionTarget(null);
+          setDeleteSectionError(null);
+        }}
+        onConfirm={() => void deleteSection()}
+      />
+
+      <ConfirmDialog
+        isOpen={rotateInvitationTarget !== null}
+        title={rotateInvitationTarget?.delivery === 'email' ? 'Resend invitation' : 'Create a fresh invitation link'}
+        description={
+          rotateInvitationTarget
+            ? `This will ${
+                rotateInvitationTarget.delivery === 'email' ? 'resend the invitation to' : 'create a copyable invitation link for'
+              } ${rotateInvitationTarget.grant.email} and invalidate the previous invitation link. Active recipient sessions stay valid.`
+            : ''
+        }
+        confirmLabel={rotateInvitationTarget?.delivery === 'email' ? 'Resend invitation' : 'Create link'}
+        error={rotateInvitationError}
+        isConfirming={isSubmitting}
+        variant="primary"
+        onCancel={() => {
+          setRotateInvitationTarget(null);
+          setRotateInvitationError(null);
+        }}
+        onConfirm={() => {
+          if (rotateInvitationTarget) {
+            void rotateInvitation(rotateInvitationTarget.grant, rotateInvitationTarget.delivery);
+          }
+        }}
+      />
+
+      <Modal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} title="Upload to room">
+        <div className="space-y-5">
+          <div>
+            <label className="text-sm font-medium text-zinc-900">Destination section</label>
+            <select
+              className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+              value={uploadSectionId}
+              onChange={(event) => setUploadSectionId(event.target.value)}
+            >
+              <option value="">Unsectioned</option>
+              {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+            </select>
+          </div>
+          {id ? (
+            <UploadQueue
+              roomId={id}
+              sectionId={uploadSectionId || undefined}
+              onClose={() => setIsUploadModalOpen(false)}
+              onSettled={async ({ successful, failed }) => {
+                if (successful) {
+                  setSuccessMessage(`${successful} document${successful === 1 ? '' : 's'} uploaded${failed ? `; ${failed} failed` : ''}.`);
+                  // Keep the upload queue mounted while refreshing so its
+                  // completion dialog can offer OK or Continue uploading.
+                  await loadData({ showLoading: false });
+                }
+              }}
+            />
+          ) : null}
+        </div>
       </Modal>
 
       <Modal isOpen={isMemberModalOpen} onClose={() => setIsMemberModalOpen(false)} title="Add Member">
@@ -646,6 +994,11 @@ export function GroupDetails() {
               <span>Allow print flag on the grant</span>
             </label>
           </div>
+          {documents.some((document) => document.protection?.download_required) && !externalCanDownload ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              This room contains download-only documents. Those files will remain listed, but the recipient cannot open them unless document download is allowed.
+            </div>
+          ) : null}
 
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
             The invitation URL only bootstraps the room session. Durable access stays on the provisioned room grant.
@@ -669,8 +1022,9 @@ export function GroupDetails() {
             : ''
         }
         confirmLabel="Revoke access"
+        error={revokeAccessError}
         isConfirming={isSubmitting}
-        onCancel={() => setRevokeAccessTarget(null)}
+        onCancel={() => { setRevokeAccessTarget(null); setRevokeAccessError(null); }}
         onConfirm={() => void handleRevokeExternalAccess()}
       />
 
@@ -683,9 +1037,10 @@ export function GroupDetails() {
             : ''
         }
         confirmLabel="Remove"
+        error={removeDocumentError}
         isConfirming={isSubmitting}
         variant="primary"
-        onCancel={() => setRemoveDocumentTarget(null)}
+        onCancel={() => { setRemoveDocumentTarget(null); setRemoveDocumentError(null); }}
         onConfirm={() => void handleRemoveFromGroup()}
       />
     </div>

@@ -28,6 +28,7 @@ from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
+from app.core.watermark_identity import pseudonymous_watermark
 from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, ShareLink
 from app.ports.access_control import AccessDenied
 from app.schemas.nda import (
@@ -132,10 +133,12 @@ def _serialize_link(link: ShareLink, token: str) -> ShareLinkResponse:
 
 
 def external_room_document_watermark(principal: ExternalRoomPrincipal) -> str:
-    identifier = principal.email
-    if principal.display_name:
-        identifier = f"{principal.display_name} <{principal.email}>"
-    return f"HexShare - {identifier}"
+    return pseudonymous_watermark(
+        principal.session_id,
+        principal.external_party_id,
+        principal.email,
+        brand_name=principal.brand_name,
+    )
 
 
 def _build_nda_status(policy, accepted: bool, *, include_text: bool = True) -> NdaStatusResponse:

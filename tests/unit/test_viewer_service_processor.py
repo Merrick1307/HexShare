@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytest
 
+from app.core.watermark_identity import pseudonymous_watermark
 from app.domain import VisitorSession
 from app.ports.object_storage_port import ObjectDescriptor, ObjectStoragePort, ObjectWriteRequest, TemporaryObjectAccess
 from app.ports.rendered_page_cache_port import RenderedPageCachePort
@@ -190,7 +191,9 @@ async def test_stream_document_uses_document_processor():
     assert content == b"source-bytes"
     assert context.document_id == "doc-1"
     assert context.session_id == "vs_1"
-    assert context.watermark_text == "HexShare - viewer@example.com"
+    assert context.watermark_text == pseudonymous_watermark(
+        "vs_1", "link-1", "viewer@example.com"
+    )
     assert context.download is False
 
 
@@ -222,7 +225,9 @@ async def test_download_document_uses_document_processor_with_link_watermark_whe
     assert len(processor.download_calls) == 1
     context, content = processor.download_calls[0]
     assert content == b"source-bytes"
-    assert context.watermark_text == "HexShare - link-1"
+    assert context.watermark_text == pseudonymous_watermark(
+        "vs_1", "link-1", None
+    )
     assert context.download is True
 
 
@@ -348,7 +353,9 @@ async def test_render_document_page_uses_processor_and_records_page_view():
     assert len(processor.render_page_calls) == 1
     context, content, page_number, render_width, cache_key = processor.render_page_calls[0]
     assert content == b"source-bytes"
-    assert context.watermark_text == "HexShare - viewer@example.com"
+    assert context.watermark_text == pseudonymous_watermark(
+        "vs_1", "link-1", "viewer@example.com"
+    )
     assert page_number == 2
     assert render_width == 1200
     assert cache_key == "documents/doc-1/report.pdf"

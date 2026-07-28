@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
+import { Link } from 'react-router-dom';
 import { Activity as ActivityIcon, Download, Eye, FileText, FolderOpen, LogIn, ShieldCheck } from 'lucide-react';
 import { api } from '../services/api';
 import { ActivityItem } from '../types';
 import { Badge } from '../components/ui/Badge';
+import { NotificationPreferencesCard } from '../components/NotificationPreferencesCard';
 
 const EVENT_META: Record<string, { label: string; icon: typeof Eye }> = {
   open: { label: 'Opened document', icon: FileText },
@@ -47,13 +49,20 @@ export function Activity() {
 
       {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
+      <NotificationPreferencesCard />
+
       <div className="overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-sm max-h-[calc(100vh-16rem)]">
         {items === null ? (
           <div className="px-6 py-10 text-center text-sm text-zinc-500">Loading activity…</div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center px-6 py-14 text-center text-sm text-zinc-500">
             <ActivityIcon className="mb-3 h-8 w-8 text-zinc-300" />
-            No activity yet. Views, downloads, and NDA acceptances will appear here.
+            <p className="font-medium text-zinc-900">No recipient activity yet</p>
+            <p className="mt-1">Share a document or invite someone to a room; verified views, downloads, and NDA acceptances will appear here.</p>
+            <div className="mt-4 flex gap-3">
+              <Link to="/dashboard" className="rounded-lg bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-700">Share a document</Link>
+              <Link to="/groups" className="rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-700 hover:bg-zinc-50">Open rooms</Link>
+            </div>
           </div>
         ) : (
           <ul className="divide-y divide-zinc-100">

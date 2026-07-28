@@ -16,14 +16,23 @@ export function useInfiniteScroll<T>({ fetchFn, pageSize = 20, enabled = true, r
   const [error, setError] = useState<string | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const generationRef = useRef(0);
 
   const loadMore = useCallback(async () => {
     if (isLoading || !hasMore || !enabled) return;
     setIsLoading(true);
     setError(null);
+    const generation = generationRef.current;
     try {
       const response = await fetchFn(items.length, pageSize);
-      setItems((prev) => [...prev, ...response.items]);
+      if (generation !== generationRef.current) return;
+      setItems((prev) => {
+        const seen = new Set(prev.map((item) => (item as { id?: string }).id).filter(Boolean));
+        return [...prev, ...response.items.filter((item) => {
+          const id = (item as { id?: string }).id;
+          return !id || !seen.has(id);
+        })];
+      });
       setTotal(response.total);
       setHasMore(items.length + response.items.length < response.total);
     } catch (err) {
@@ -55,6 +64,7 @@ export function useInfiniteScroll<T>({ fetchFn, pageSize = 20, enabled = true, r
   }, [loadMore, enabled]);
 
   const reset = useCallback(() => {
+    generationRef.current += 1;
     setItems([]);
     setTotal(0);
     setHasMore(true);

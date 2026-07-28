@@ -25,6 +25,7 @@ from app.domain import (
     ExternalRoomSession,
     NdaAcceptance,
     NdaPolicy,
+    RoomSection,
     ShareLink,
     VisitorSession,
     ViewEvent,
@@ -156,10 +157,74 @@ class StoragePort(ABC):
         """
 
     @abstractmethod
+    async def page_ungrouped_documents_by_permission(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        required_permission: int,
+        query: Optional[str],
+        offset: int,
+        limit: int,
+    ) -> tuple[list[Document], int]:
+        """Return a filtered page of accessible personal documents and its total."""
+
+    @abstractmethod
     async def list_documents_by_room(
         self, *, tenant_id: str, room_id: str
     ) -> Iterable[Document]:
         """Return every document belonging to a room/group."""
+
+    @abstractmethod
+    async def list_room_sections(
+        self, *, tenant_id: str, room_id: str
+    ) -> Iterable[RoomSection]:
+        """List room sections in their explicit order."""
+
+    @abstractmethod
+    async def create_room_section(self, section: RoomSection) -> RoomSection:
+        """Append and persist a room section."""
+
+    @abstractmethod
+    async def update_room_section(
+        self, *, tenant_id: str, room_id: str, section_id: str, name: str
+    ) -> Optional[RoomSection]:
+        """Rename a room section."""
+
+    @abstractmethod
+    async def delete_room_section(
+        self, *, tenant_id: str, room_id: str, section_id: str
+    ) -> bool:
+        """Delete a section after moving its documents to Unsectioned."""
+
+    @abstractmethod
+    async def reorder_room_sections(
+        self, *, tenant_id: str, room_id: str, section_ids: list[str]
+    ) -> Iterable[RoomSection]:
+        """Replace the complete section order transactionally."""
+
+    @abstractmethod
+    async def place_room_document(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        room_id: str,
+        section_id: Optional[str],
+        position: Optional[int],
+    ) -> Optional[Document]:
+        """Place a document in a room section at an explicit or appended position."""
+
+    @abstractmethod
+    async def reorder_room_documents(
+        self,
+        *,
+        tenant_id: str,
+        room_id: str,
+        section_id: Optional[str],
+        document_ids: list[str],
+    ) -> Iterable[Document]:
+        """Replace the complete order for documents in a section."""
 
     @abstractmethod
     async def save_document_group(self, group: DocumentGroup) -> None:
@@ -176,6 +241,18 @@ class StoragePort(ABC):
         self, *, tenant_id: str, group_ids: Iterable[str]
     ) -> Iterable[DocumentGroup]:
         """Return the document groups whose IDs are in ``group_ids``."""
+
+    @abstractmethod
+    async def page_document_groups_by_ids(
+        self,
+        *,
+        tenant_id: str,
+        group_ids: Iterable[str],
+        query: Optional[str],
+        offset: int,
+        limit: int,
+    ) -> tuple[list[DocumentGroup], int]:
+        """Return a query-filtered room page and total before pagination."""
 
     @abstractmethod
     async def update_document_group(

@@ -20,16 +20,18 @@ class DocumentEventListener:
         event_bus: EventBusPort,
         email_service: EmailNotificationPort,
         template_loader: EmailTemplateLoader = None,
+        brand_name: str = "HexShare",
     ):
         self.event_bus = event_bus
         self.email_service = email_service
         self.template_loader = template_loader or EmailTemplateLoader()
+        self.brand_name = brand_name.strip() or "HexShare"
 
     async def handle_document_shared(self, tenant_id: str, payload: Dict[str, Any]) -> None:
         """Handle document shared event."""
         recipient_email = payload.get("recipient_email")
         document_name = payload.get("document_name")
-        shared_by_name = payload.get("shared_by_name") or "Someone on HexShare"
+        shared_by_name = payload.get("shared_by_name") or self.brand_name
 
         context = {
             "document_name": document_name,
@@ -90,7 +92,7 @@ class DocumentEventListener:
         """Handle external room invited event."""
         recipient_email = payload.get("recipient_email")
         room_name = payload.get("room_name")
-        invited_by_name = payload.get("invited_by_name") or "Someone on HexShare"
+        invited_by_name = payload.get("invited_by_name") or self.brand_name
 
         context = {
             "room_name": room_name,

@@ -138,7 +138,11 @@ const faqItems = [
   },
   {
     question: 'What can users do in the app today?',
-    answer: 'Users can upload documents, organize them into rooms, share protected links, inspect analytics, and revoke access.',
+    answer: 'Users can bulk-upload documents, organize them into ordered room sections, share protected links or room invitations, inspect activity, and revoke access.',
+  },
+  {
+    question: 'Which document formats are supported?',
+    answer: 'Common PDF, Word, Excel, PowerPoint, text, CSV, Markdown, and image files are accepted. PDF provides the strongest recipient-watermarked viewer with page-level activity; other formats may use a protected preview or require a controlled download, and the protection level is shown before sharing.',
   },
   {
     question: 'Can HexShare be self-hosted?',

@@ -26,7 +26,7 @@ from app.core.authz import (
     ResourceAction,
     bitmask_to_action_names,
 )
-from app.domain import Document, DocumentGroup
+from app.domain import Document, DocumentGroup, RoomSection
 from app.ports.access_control import AccessDenied
 from app.ports.iam_policy import IAMPolicyError, IAMPolicyPort
 from app.ports.storage_port import StoragePort
@@ -87,6 +87,22 @@ class DocumentGroupService:
             tenant_id=principal.tenant_id, group_ids=ids
         )
 
+    async def page_user_groups(
+        self,
+        *,
+        principal: TenantPrincipal,
+        query: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[DocumentGroup], int]:
+        return await self._storage.page_document_groups_by_ids(
+            tenant_id=principal.tenant_id,
+            group_ids=self._group_ids_from_principal(principal),
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+
     async def get_group(
         self, *, principal: TenantPrincipal, group_id: str, required: ResourceAction = ResourceAction.READ
     ) -> DocumentGroup:
@@ -105,6 +121,124 @@ class DocumentGroupService:
         self._require_group_permission(principal, group_id, ResourceAction.READ)
         return await self._storage.list_documents_by_room(
             tenant_id=principal.tenant_id, room_id=group_id
+        )
+
+    async def list_sections(
+        self, *, principal: TenantPrincipal, group_id: str
+    ) -> list[RoomSection]:
+        await self.get_group(
+            principal=principal, group_id=group_id, required=ResourceAction.READ
+        )
+        return list(
+            await self._storage.list_room_sections(
+                tenant_id=principal.tenant_id, room_id=group_id
+            )
+        )
+
+    @staticmethod
+    def _normalize_section_name(name: str) -> str:
+        normalized = " ".join((name or "").split())
+        if not 1 <= len(normalized) <= 120:
+            raise ValueError("invalid_section_name")
+        return normalized
+
+    async def create_section(
+        self, *, principal: TenantPrincipal, group_id: str, name: str
+    ) -> RoomSection:
+        await self.get_group(
+            principal=principal, group_id=group_id, required=ResourceAction.MANAGE
+        )
+        now = datetime.utcnow()
+        return await self._storage.create_room_section(
+            RoomSection(
+                id=self._storage.generate_id("rsec"),
+                tenant_id=principal.tenant_id,
+                room_id=group_id,
+                name=self._normalize_section_name(name),
+                position=0,
+                created_by=principal.user_id,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    async def rename_section(
+        self,
+        *,
+        principal: TenantPrincipal,
+        group_id: str,
+        section_id: str,
+        name: str,
+    ) -> RoomSection:
+        await self.get_group(
+            principal=principal, group_id=group_id, required=ResourceAction.MANAGE
+        )
+        section = await self._storage.update_room_section(
+            tenant_id=principal.tenant_id,
+            room_id=group_id,
+            section_id=section_id,
+            name=self._normalize_section_name(name),
+        )
+        if section is None:
+            raise ValueError("section_not_found")
+        return section
+
+    async def delete_section(
+        self, *, principal: TenantPrincipal, group_id: str, section_id: str
+    ) -> None:
+        await self.get_group(
+            principal=principal, group_id=group_id, required=ResourceAction.MANAGE
+        )
+        deleted = await self._storage.delete_room_section(
+            tenant_id=principal.tenant_id,
+            room_id=group_id,
+            section_id=section_id,
+        )
+        if not deleted:
+            raise ValueError("section_not_found")
+
+    async def reorder_sections(
+        self,
+        *,
+        principal: TenantPrincipal,
+        group_id: str,
+        section_ids: list[str],
+    ) -> list[RoomSection]:
+        await self.get_group(
+            principal=principal, group_id=group_id, required=ResourceAction.MANAGE
+        )
+        return list(
+            await self._storage.reorder_room_sections(
+                tenant_id=principal.tenant_id,
+                room_id=group_id,
+                section_ids=section_ids,
+            )
+        )
+
+    async def reorder_documents(
+        self,
+        *,
+        principal: TenantPrincipal,
+        group_id: str,
+        section_id: str | None,
+        document_ids: list[str],
+    ) -> list[Document]:
+        await self.get_group(
+            principal=principal, group_id=group_id, required=ResourceAction.MANAGE
+        )
+        if section_id is not None:
+            sections = await self._storage.list_room_sections(
+                tenant_id=principal.tenant_id, room_id=group_id
+            )
+            if section_id not in {section.id for section in sections}:
+                raise ValueError("section_not_found")
+        return list(
+            await self._storage.reorder_room_documents(
+                tenant_id=principal.tenant_id,
+                room_id=group_id,
+                section_id=section_id,
+                document_ids=document_ids,
+            )
         )
 
     async def create_group(

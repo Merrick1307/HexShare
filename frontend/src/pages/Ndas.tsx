@@ -128,7 +128,7 @@ export function Ndas() {
         <p className="text-muted-foreground mt-2 max-w-3xl text-sm leading-relaxed">
           Which documents and rooms are NDA-gated, and how many recipients have
           signed the current version. Set or edit an NDA from a document or
-          room.
+          room. Agreements may be entered as text or uploaded as PDF.
         </p>
       </div>
 
@@ -166,7 +166,16 @@ export function Ndas() {
                   className="text-muted-foreground px-6 py-14 text-center"
                 >
                   <ShieldCheck className="text-primary mx-auto mb-3 h-8 w-8" />
-                  No NDAs configured. Open a document or a room to require one.
+                  <p className="text-foreground font-medium">No NDAs configured</p>
+                  <p className="mx-auto mt-2 max-w-xl text-sm">
+                    Create a room or upload a document, then configure its NDA from that item.
+                    Agreements may be text or PDF. A renderable PDF receives the strongest
+                    protected-viewing treatment when shared as a document.
+                  </p>
+                  <div className="mt-4 flex justify-center gap-3">
+                    <Link to="/groups" className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">Create a room</Link>
+                    <Link to="/dashboard" className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50">Upload a document</Link>
+                  </div>
                 </td>
               </tr>
             ) : (

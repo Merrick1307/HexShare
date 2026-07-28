@@ -3,6 +3,23 @@ from __future__ import annotations
 from datetime import datetime
 
 from pydantic import BaseModel
+from typing import Literal, Optional
+
+
+class ProductEventRequest(BaseModel):
+    event_name: Literal[
+        "onboarding_shown",
+        "onboarding_step_clicked",
+        "first_document_uploaded",
+        "first_room_created",
+        "first_share_created",
+        "first_recipient_viewed",
+        "onboarding_dismissed",
+        "onboarding_completed",
+    ]
+    step: Optional[
+        Literal["upload_document", "create_room", "create_share", "view_activity"]
+    ] = None
 
 
 class WorkspaceSummaryResponse(BaseModel):
@@ -11,6 +28,7 @@ class WorkspaceSummaryResponse(BaseModel):
     active_links: int = 0
     external_recipients: int = 0
     document_opens: int = 0
+    onboarding_complete: bool = False
 
 
 class ActivityItemResponse(BaseModel):

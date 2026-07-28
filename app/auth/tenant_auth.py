@@ -33,6 +33,10 @@ class TenantPrincipal:
     user_id: str
     token: Optional[str] = None
     roles: Sequence[str] | None = None
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     # IAM policy embedded in the access token: resource_id -> bitmask.
     # Empty mapping when the token has no embedded policy (e.g. pure OIDC).
     policy: Mapping[str, Any] = field(default_factory=dict)
@@ -69,12 +73,25 @@ class TenantAuthDependency:
                 raise HTTPException(status_code=401, detail="Token missing tenant or user claims")
             roles = payload.roles
             policy = payload.policy or {}
+            claims = payload.claims or {}
+            email = str(claims.get("email") or "").strip().lower() or None
+            first_name = str(claims.get("given_name") or "").strip() or None
+            last_name = str(claims.get("family_name") or "").strip() or None
+            display_name = str(claims.get("name") or "").strip() or None
+            if display_name is None:
+                display_name = " ".join(
+                    part for part in (first_name, last_name) if part
+                ).strip() or None
             return TenantPrincipal(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 roles=roles,
                 token=token,
                 policy=policy,
+                email=email,
+                display_name=display_name,
+                first_name=first_name,
+                last_name=last_name,
             )
         return verify
 

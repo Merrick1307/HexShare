@@ -16,7 +16,9 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator, validator
+
+from app.core.document_type_policy import describe_document_protection
 
 
 class EventType(str, Enum):
@@ -99,6 +101,16 @@ class NdaSubjectKind(str, Enum):
     VISITOR_SESSION = "visitor_session"
 
 
+class DocumentProtection(BaseModel):
+    profile: str
+    label: str
+    inline_view_supported: bool
+    watermark_mode: Optional[str] = None
+    page_activity: bool = False
+    download_required: bool = False
+    reason: Optional[str] = None
+
+
 class Document(BaseModel):
     """Metadata about an uploaded document.
 
@@ -133,6 +145,23 @@ class Document(BaseModel):
     created_at: datetime
     created_by: str
     room_id: Optional[str] = None  # NULL = ungrouped (uses document_permissions). Otherwise: IAM resource id (e.g. dcgrp_...).
+    room_section_id: Optional[str] = None
+    room_position: int = 0
+    protection: Optional[DocumentProtection] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def add_protection_descriptor(cls, values):  # type: ignore[override]
+        if not isinstance(values, dict):
+            return values
+        values = dict(values)
+        if values.get("protection") is None:
+            descriptor = describe_document_protection(
+                str(values.get("name") or ""),
+                values.get("mime_type"),
+            )
+            values["protection"] = descriptor.as_dict()
+        return values
 
 
 class DocumentGroup(BaseModel):
@@ -150,6 +179,17 @@ class DocumentGroup(BaseModel):
     description: Optional[str] = None
     created_by: str
     created_at: datetime
+
+
+class RoomSection(BaseModel):
+    id: str
+    tenant_id: str
+    room_id: str
+    name: str = Field(min_length=1, max_length=120)
+    position: int = Field(ge=0)
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class DocumentPermission(BaseModel):
@@ -283,6 +323,8 @@ class ExternalAccessGrant(BaseModel):
     granted_by: str
     granted_at: datetime
     updated_at: datetime
+    invite_version: int = 1
+    last_invited_at: Optional[datetime] = None
 
 
 class ExternalRoomSession(BaseModel):

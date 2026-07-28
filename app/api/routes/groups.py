@@ -28,7 +28,7 @@ from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
-from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, ShareLink
+from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, RoomSection, ShareLink
 from app.ports.access_control import AccessDenied
 from app.schemas.nda import (
     NdaAcceptRequest,
@@ -49,6 +49,14 @@ from app.schemas.external_room import (
     ProvisionExternalRoomAccessResponse,
 )
 from app.schemas.pagination import PaginatedResponse
+from app.schemas.rooms import (
+    CreateRoomSectionRequest,
+    RenameRoomSectionRequest,
+    ReorderRoomDocumentsRequest,
+    ReorderRoomSectionsRequest,
+    ReissueInvitationRequest,
+    ReissueInvitationResponse,
+)
 from app.schemas.share import ShareLinkResponse
 from app.schemas.workspace import (
     ActivityItemResponse,
@@ -99,12 +107,17 @@ def build_router() -> APIRouter:
     async def list_document_groups(
         offset: int = Query(0, ge=0),
         limit: int = Query(20, ge=1, le=100),
+        query: Optional[str] = Query(None),
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         group_service: DocumentGroupService = Depends(get_document_group_service),
     ) -> PaginatedResponse[DocumentGroup]:
-        groups = list(await group_service.list_user_groups(principal=principal))
-        total = len(groups)
-        return PaginatedResponse(items=groups[offset:offset + limit], total=total)
+        groups, total = await group_service.page_user_groups(
+            principal=principal,
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+        return PaginatedResponse(items=groups, total=total)
 
     @router.post("/document-groups", response_model=DocumentGroup)
     async def create_document_group(
@@ -186,6 +199,133 @@ def build_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="Forbidden")
         return list(docs)
 
+    @router.get(
+        "/document-groups/{group_id}/sections", response_model=list[RoomSection]
+    )
+    async def list_room_sections(
+        group_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> list[RoomSection]:
+        try:
+            return await group_service.list_sections(
+                principal=principal, group_id=group_id
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+    @router.post(
+        "/document-groups/{group_id}/sections",
+        response_model=RoomSection,
+        status_code=201,
+    )
+    async def create_room_section(
+        group_id: str,
+        payload: CreateRoomSectionRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> RoomSection:
+        try:
+            return await group_service.create_section(
+                principal=principal, group_id=group_id, name=payload.name
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.patch(
+        "/document-groups/{group_id}/sections/{section_id}",
+        response_model=RoomSection,
+    )
+    async def rename_room_section(
+        group_id: str,
+        section_id: str,
+        payload: RenameRoomSectionRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> RoomSection:
+        try:
+            return await group_service.rename_section(
+                principal=principal,
+                group_id=group_id,
+                section_id=section_id,
+                name=payload.name,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404 if str(exc) == "section_not_found" else 400,
+                detail=str(exc),
+            )
+
+    @router.delete(
+        "/document-groups/{group_id}/sections/{section_id}",
+        status_code=204,
+        response_class=Response,
+        response_model=None,
+    )
+    async def delete_room_section(
+        group_id: str,
+        section_id: str,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> None:
+        try:
+            await group_service.delete_section(
+                principal=principal, group_id=group_id, section_id=section_id
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Room section not found")
+
+    @router.put(
+        "/document-groups/{group_id}/sections/order",
+        response_model=list[RoomSection],
+    )
+    async def reorder_room_sections(
+        group_id: str,
+        payload: ReorderRoomSectionsRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> list[RoomSection]:
+        try:
+            return await group_service.reorder_sections(
+                principal=principal,
+                group_id=group_id,
+                section_ids=payload.section_ids,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+    @router.put(
+        "/document-groups/{group_id}/documents/order",
+        response_model=list[Document],
+    )
+    async def reorder_room_documents(
+        group_id: str,
+        payload: ReorderRoomDocumentsRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+    ) -> list[Document]:
+        try:
+            return await group_service.reorder_documents(
+                principal=principal,
+                group_id=group_id,
+                section_id=payload.section_id,
+                document_ids=payload.document_ids,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
     @router.post("/document-groups/{group_id}/documents", response_model=Document)
     async def create_document_in_group(
         group_id: str,
@@ -206,6 +346,8 @@ def build_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="Forbidden")
         except ValueError:
             raise HTTPException(status_code=404, detail="Group not found")
+        # Compatibility path for existing API clients. The first-party uploader
+        # finalizes through /uploads/complete so object validation also runs.
         return await document_service.create_document(
             tenant_id=principal.tenant_id,
             name=name,
@@ -370,4 +512,55 @@ def build_router() -> APIRouter:
         except ValueError:
             raise HTTPException(status_code=404, detail="Grant not found")
         return None
+
+    @router.post(
+        "/document-groups/{group_id}/external-access/{grant_id}/invitation",
+        response_model=ReissueInvitationResponse,
+    )
+    async def reissue_external_room_invitation(
+        group_id: str,
+        grant_id: str,
+        payload: ReissueInvitationRequest,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+        group_service: DocumentGroupService = Depends(get_document_group_service),
+        external_room_access_service: ExternalRoomAccessService = Depends(
+            get_external_room_access_service
+        ),
+    ) -> ReissueInvitationResponse:
+        try:
+            await group_service.get_group(
+                principal=principal,
+                group_id=group_id,
+                required=ResourceAction.MANAGE,
+            )
+            reissued = await external_room_access_service.reissue_room_invitation(
+                principal=principal,
+                room_id=group_id,
+                grant_id=grant_id,
+                delivery=payload.delivery,
+            )
+        except AccessDenied:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        except ValueError as exc:
+            detail = str(exc)
+            if detail.startswith("invite_resend_cooldown:"):
+                retry_after = int(detail.rsplit(":", 1)[1])
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "code": "invite_resend_cooldown",
+                        "message": "Please wait before rotating this invitation again.",
+                        "retry_after_seconds": retry_after,
+                    },
+                )
+            if detail in {"grant_revoked", "grant_expired"}:
+                raise HTTPException(status_code=409, detail=detail)
+            raise HTTPException(status_code=404, detail="Grant not found")
+        return ReissueInvitationResponse(
+            grant_id=reissued.grant.id,
+            invite_path=f"/external-room/invitations/{reissued.invite_token}",
+            invite_expires_at=reissued.invite_expires_at,
+            email_sent=reissued.email_sent,
+            resend_available_at=reissued.resend_available_at,
+        )
     return router

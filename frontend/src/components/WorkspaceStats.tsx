@@ -11,7 +11,7 @@ const CARDS: { key: keyof WorkspaceSummary; label: string; icon: typeof FileText
   { key: 'document_opens', label: 'Document opens', icon: Eye },
 ];
 
-export function WorkspaceStats() {
+export function WorkspaceStats({ documentsLabel = 'Documents' }: { documentsLabel?: string }) {
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
 
   useEffect(() => {
@@ -31,7 +31,9 @@ export function WorkspaceStats() {
         <div key={key} className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2 text-zinc-500">
             <Icon className="h-4 w-4" />
-            <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+            <span className="text-xs font-medium uppercase tracking-wide">
+              {key === 'documents' ? documentsLabel : label}
+            </span>
           </div>
           <p className="mt-2 text-2xl font-semibold text-zinc-950">
             {summary ? summary[key] : '—'}

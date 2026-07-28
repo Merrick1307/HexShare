@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +54,7 @@ from app.schemas.share import ShareLinkResponse
 from app.schemas.workspace import (
     ActivityItemResponse,
     NdaPolicySummaryResponse,
+    ProductEventRequest,
     WorkspaceSummaryResponse,
 )
 from app.schemas.upload import DownloadUrlResponse
@@ -97,13 +99,52 @@ def build_router() -> APIRouter:
 
     # ---- Workspace dashboards (summary / activity / NDA compliance) ----
 
+    async def _owner_scoped(method, *, principal: TenantPrincipal, **kwargs):
+        """Use hosted individual filtering without changing OSS team semantics."""
+        if "created_by" in inspect.signature(method).parameters:
+            kwargs["created_by"] = principal.user_id
+        return await method(**kwargs)
+
     @router.get("/workspace/summary", response_model=WorkspaceSummaryResponse)
     async def workspace_summary(
         principal: TenantPrincipal = Depends(get_tenant_auth()),
         storage=Depends(get_storage),
     ) -> WorkspaceSummaryResponse:
-        data = await storage.get_workspace_summary(tenant_id=principal.tenant_id)
+        data = await _owner_scoped(
+            storage.get_workspace_summary,
+            principal=principal,
+            tenant_id=principal.tenant_id,
+        )
+        data = dict(data)
+        data["onboarding_complete"] = (
+            int(data.get("documents") or 0) > 0
+            and int(data.get("groups") or 0) > 0
+            and (
+                int(data.get("active_links") or 0) > 0
+                or int(data.get("external_recipients") or 0) > 0
+            )
+            and int(data.get("document_opens") or 0) > 0
+        )
         return WorkspaceSummaryResponse(**data)
+
+    @router.post("/workspace/product-events", status_code=204)
+    async def record_product_event(
+        body: ProductEventRequest,
+        request: Request,
+        principal: TenantPrincipal = Depends(get_tenant_auth()),
+    ) -> Response:
+        # Deliberately accept only a fixed event and step vocabulary. Customer
+        # document names, recipient emails, and file contents cannot enter this
+        # analytics channel.
+        await request.app.state.event_bus.publish_event(
+            principal.tenant_id,
+            body.event_name,
+            {
+                "owner_user_id": principal.user_id,
+                "step": body.step,
+            },
+        )
+        return Response(status_code=204)
 
     @router.get("/activity", response_model=list[ActivityItemResponse])
     async def workspace_activity(
@@ -112,10 +153,30 @@ def build_router() -> APIRouter:
         storage=Depends(get_storage),
     ) -> list[ActivityItemResponse]:
         tenant_id = principal.tenant_id
-        view_events = list(await storage.list_recent_view_events(tenant_id=tenant_id, limit=limit))
-        room_events = list(await storage.list_recent_external_room_events(tenant_id=tenant_id, limit=limit))
+        view_events = list(
+            await _owner_scoped(
+                storage.list_recent_view_events,
+                principal=principal,
+                tenant_id=tenant_id,
+                limit=limit,
+            )
+        )
+        room_events = list(
+            await _owner_scoped(
+                storage.list_recent_external_room_events,
+                principal=principal,
+                tenant_id=tenant_id,
+                limit=limit,
+            )
+        )
 
-        documents = list(await storage.list_documents(tenant_id=tenant_id))
+        documents = list(
+            await _owner_scoped(
+                storage.list_documents,
+                principal=principal,
+                tenant_id=tenant_id,
+            )
+        )
         doc_names = {d.id: d.name for d in documents}
         room_ids = {e.room_id for e in room_events if e.room_id}
         groups = (
@@ -166,8 +227,20 @@ def build_router() -> APIRouter:
         storage=Depends(get_storage),
     ) -> list[NdaPolicySummaryResponse]:
         tenant_id = principal.tenant_id
-        policies = list(await storage.list_nda_policies(tenant_id=tenant_id))
-        documents = list(await storage.list_documents(tenant_id=tenant_id))
+        policies = list(
+            await _owner_scoped(
+                storage.list_nda_policies,
+                principal=principal,
+                tenant_id=tenant_id,
+            )
+        )
+        documents = list(
+            await _owner_scoped(
+                storage.list_documents,
+                principal=principal,
+                tenant_id=tenant_id,
+            )
+        )
         doc_names = {d.id: d.name for d in documents}
         room_ids = {p.scope_id for p in policies if p.scope_type == NdaScopeType.ROOM}
         groups = (

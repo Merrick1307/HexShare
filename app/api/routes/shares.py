@@ -174,6 +174,7 @@ def build_router() -> APIRouter:
             tenant_id=principal.tenant_id,
             document_id=document_id,
             created_by=principal.user_id,
+            created_by_name=principal.display_name,
             expires_in_seconds=expires_in,
             can_download=can_download,
             can_print=can_print,

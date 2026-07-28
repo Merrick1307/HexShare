@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.domain import EventType, VisitorSession, ViewEvent
+from app.core.watermark_identity import pseudonymous_watermark
 from app.ports.object_storage_port import ObjectStoragePort
 from app.ports.rendered_page_cache_port import RenderedPageCachePort
 from app.ports.storage_port import StoragePort
 from app.ports.task_queue_port import TaskQueuePort
+from app.ports import EventBusPort
 from app.services.document_processor import (
     DocumentProcessor,
     DocumentProcessingError,
@@ -91,6 +93,8 @@ class ViewerService:
         document_service: DocumentService,
         link_service: LinkService,
         nda_service: NdaService | None = None,
+        event_bus: EventBusPort | None = None,
+        watermark_brand: str = "HexShare",
     ) -> None:
         self._storage = storage
         self._object_storage = object_storage
@@ -100,6 +104,8 @@ class ViewerService:
         self._document_service = document_service
         self._link_service = link_service
         self._nda_service = nda_service
+        self._event_bus = event_bus
+        self._watermark_brand = watermark_brand.strip() or "HexShare"
         self._content_cache = _BytesCache(maxsize=50, ttl_seconds=300.0)
 
     @staticmethod
@@ -112,10 +118,13 @@ class ViewerService:
             return None
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _build_watermark_text(*, resolved: ResolvedViewSession) -> str:
-        identifier = resolved.email or resolved.link_id
-        return f"HexShare - {identifier}"
+    def _build_watermark_text(self, *, resolved: ResolvedViewSession) -> str:
+        return pseudonymous_watermark(
+            resolved.session.id,
+            resolved.link_id,
+            resolved.email,
+            brand_name=self._watermark_brand,
+        )
 
     def _build_processing_context(
         self,
@@ -239,6 +248,20 @@ class ViewerService:
                 timestamp=self._now(),
             )
         )
+        if self._event_bus:
+            await self._event_bus.publish_event(
+                tenant_id,
+                "recipient.document_opened",
+                {
+                    "tenant_id": tenant_id,
+                    "owner_user_id": document.created_by,
+                    "document_id": document.id,
+                    "room_id": document.room_id,
+                    "external_party_id": session.external_party_id,
+                    "visitor_session_id": session.id,
+                    "occurred_at": session.started_at.isoformat(),
+                },
+            )
         return session
 
     async def resolve_view_session(self, *, session_id: str) -> ResolvedViewSession:
@@ -518,11 +541,31 @@ class ViewerService:
     async def download_document(self, *, tenant_id: str, session_id: str) -> ProcessedDocument:
         resolved = await self.ensure_active_session(tenant_id=tenant_id, session_id=session_id)
         await self._enforce_nda(resolved=resolved)
-        return await self._process_document(
+        processed = await self._process_document(
             resolved=resolved,
             session_id=session_id,
             download=True,
         )
+        if self._event_bus:
+            document = await self._document_service.get_document(
+                tenant_id=tenant_id,
+                document_id=resolved.document_id,
+            )
+            if document:
+                await self._event_bus.publish_event(
+                    tenant_id,
+                    "recipient.document_downloaded",
+                    {
+                        "tenant_id": tenant_id,
+                        "owner_user_id": document.created_by,
+                        "document_id": document.id,
+                        "room_id": document.room_id,
+                        "external_party_id": resolved.session.external_party_id,
+                        "visitor_session_id": session_id,
+                        "occurred_at": self._now().isoformat(),
+                    },
+                )
+        return processed
 
     async def _read_object_cached(self, *, object_key: str) -> bytes:
         cached = await self._content_cache.get(object_key)

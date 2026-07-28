@@ -42,6 +42,15 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
           setRequireScroll(p.require_scroll);
           setRequireSignature(p.require_typed_signature);
           setMode(p.content_type === 'pdf' ? 'pdf' : 'text');
+          void listAcceptances(id)
+            .then((records) => {
+              if (!cancelled) setAcceptances(records);
+            })
+            .catch(() => {
+              if (!cancelled) setAcceptances([]);
+            });
+        } else {
+          setAcceptances(null);
         }
       })
       .catch(() => setPolicy(null))
@@ -75,6 +84,7 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
         });
       }
       setPolicy(saved);
+      setAcceptances([]);
       setTextBody('');
       if (fileRef.current) fileRef.current.value = '';
       setInfo(`NDA saved (v${saved.version}).`);
@@ -118,6 +128,7 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
         <CardDescription>
           Require recipients to accept a Non-Disclosure Agreement before opening
           {scope === 'room' ? ' any document in this room.' : ' this document.'}
+          {' '}Agreements may be entered as text or uploaded as PDF.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -172,6 +183,9 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
               <div className="space-y-1">
                 <label className="text-sm font-medium text-zinc-900">NDA PDF</label>
                 <input ref={fileRef} type="file" accept="application/pdf" className="block w-full text-sm" />
+                <p className="text-xs text-zinc-500">
+                  A renderable PDF receives the strongest protected-viewing treatment when it is shared as a document.
+                </p>
               </div>
             )}
 
@@ -195,7 +209,7 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
               </Button>
               {policy ? (
                 <Button variant="ghost" size="sm" onClick={() => void handleShowAcceptances()}>
-                  View acceptances
+                  Refresh acceptances
                 </Button>
               ) : null}
             </div>
@@ -208,7 +222,7 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
                 {acceptances.length === 0 ? (
                   <p className="px-4 py-3 text-sm text-zinc-500">No acceptances recorded yet.</p>
                 ) : (
-                  <ul className="divide-y divide-zinc-100">
+                  <ul className="max-h-64 divide-y divide-zinc-100 overflow-y-auto">
                     {acceptances.map((a) => (
                       <li key={a.id} className="flex items-center justify-between px-4 py-2 text-sm">
                         <span className="text-zinc-800">

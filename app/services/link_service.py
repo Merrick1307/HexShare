@@ -30,10 +30,18 @@ from app.ports import EventBusPort
 class LinkService:
     """Business logic for share link lifecycle."""
 
-    def __init__(self, storage: StoragePort, token_port: TokenPort, event_bus: EventBusPort) -> None:
+    def __init__(
+        self,
+        storage: StoragePort,
+        token_port: TokenPort,
+        event_bus: EventBusPort,
+        *,
+        brand_name: str = "HexShare",
+    ) -> None:
         self._storage = storage
         self._token_port = token_port
         self._event_bus = event_bus
+        self._brand_name = brand_name.strip() or "HexShare"
 
     @staticmethod
     def _normalize_email(email: str | None) -> str | None:
@@ -55,6 +63,7 @@ class LinkService:
         tenant_id: str,
         document_id: str,
         created_by: str,
+        created_by_name: str | None = None,
         expires_in_seconds: int,
         can_download: bool = False,
         can_print: bool = False,
@@ -171,7 +180,7 @@ class LinkService:
                     "document_name": document.name if document else "Document",
                     "document_id": document_id,
                     "shared_by": created_by,
-                    "shared_by_name": "Someone on HexShare",  # TODO: Get actual user name
+                    "shared_by_name": (created_by_name or "").strip() or self._brand_name,
                     "access_link": token,  # TODO: Generate actual token URL
                     "expires_at": expires_at.isoformat(),
                     "can_download": can_download,

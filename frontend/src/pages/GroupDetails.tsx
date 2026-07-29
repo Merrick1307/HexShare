@@ -409,33 +409,33 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
   const latestInviteUrl = latestProvision ? api.toAbsoluteFrontendUrl(latestProvision.invite_path) : null;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
         <Link to="/groups" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900">
           <ArrowLeft className="h-4 w-4" /> Back to Rooms
         </Link>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+      <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 sm:h-14 sm:w-14">
             <Folder className="h-7 w-7" />
           </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{group.name}</h1>
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-950">{group.name}</h1>
             {group.description && <p className="mt-1 text-sm text-zinc-500">{group.description}</p>}
           </div>
         </div>
-        {!tabbedAdminView ? <div className="flex flex-wrap gap-3">
-          <Button variant="outline" onClick={openMemberModal} className="gap-2">
+        {!tabbedAdminView ? <div className="grid gap-2 sm:flex sm:flex-wrap sm:gap-3">
+          <Button variant="outline" onClick={openMemberModal} className="w-full gap-2 sm:w-auto">
             <UserPlus className="h-4 w-4" />
             Add Member
           </Button>
-          <Button variant="outline" onClick={openExternalAccessModal} className="gap-2">
+          <Button variant="outline" onClick={openExternalAccessModal} className="w-full gap-2 sm:w-auto">
             <Mail className="h-4 w-4" />
             Invite External
           </Button>
-          <Button onClick={() => { setUploadSectionId(''); setIsUploadModalOpen(true); }} className="gap-2">
+          <Button onClick={() => { setUploadSectionId(''); setIsUploadModalOpen(true); }} className="w-full gap-2 sm:w-auto">
             <Upload className="h-4 w-4" />
             Upload to Room
           </Button>
@@ -445,8 +445,8 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
 
       {tabbedAdminView ? (
-        <div className="border-b border-zinc-200">
-          <div className="-mb-px flex gap-6" role="tablist" aria-label="Room administration">
+        <div className="overflow-x-auto border-b border-zinc-200">
+          <div className="-mb-px flex min-w-max gap-4 sm:gap-6" role="tablist" aria-label="Room administration">
             {([
               { id: 'home', label: 'Home', icon: Home },
               { id: 'documents', label: 'Documents', icon: FileText },
@@ -498,7 +498,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                   <h2 className="font-semibold text-zinc-950">Internal room access</h2>
                   <p className="mt-1 text-sm text-zinc-500">Add a workspace member who should help manage this room.</p>
                 </div>
-                <Button variant="outline" onClick={openMemberModal} className="shrink-0 gap-2">
+                <Button variant="outline" onClick={openMemberModal} className="w-full shrink-0 gap-2 sm:w-auto">
                   <UserPlus className="h-4 w-4" />
                   Add Member
                 </Button>
@@ -519,7 +519,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
               </p>
               <p className="break-all font-mono text-xs text-indigo-800">{latestInviteUrl}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => void copyToClipboard(latestInviteUrl)}>
                 <Copy className="mr-2 h-4 w-4" />
                 {copiedValue === latestInviteUrl ? 'Copied' : 'Copy'}
@@ -534,12 +534,12 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
       ) : null}
 
       {(!tabbedAdminView || activeTab === 'documents') ? <div className="space-y-4" role={tabbedAdminView ? 'tabpanel' : undefined}>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-lg font-semibold text-zinc-950">Room documents</h2>
             <p className="text-sm text-zinc-500">Sections and document order are shown to recipients exactly as arranged here.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {tabbedAdminView ? (
               <Button type="button" size="sm" onClick={() => { setUploadSectionId(''); setIsUploadModalOpen(true); }}>
                 <Upload className="mr-2 h-4 w-4" /> Upload
@@ -594,7 +594,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                       </div>
                       <select
                         aria-label={`Move ${doc.name} to section`}
-                        className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs"
+                        className="order-last w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs sm:order-none sm:w-auto"
                         value={doc.room_section_id || ''}
                         onChange={(event) => void moveDocumentToSection(doc, event.target.value || null)}
                       >
@@ -614,7 +614,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
       </div> : null}
 
       {(!tabbedAdminView || activeTab === 'external-parties') ? <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" role={tabbedAdminView ? 'tabpanel' : undefined}>
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-5">
+        <div className="flex flex-col items-stretch justify-between gap-4 border-b border-zinc-200 px-4 py-5 sm:flex-row sm:items-start sm:px-6">
           <div>
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold text-zinc-950">External access</h2>
@@ -624,13 +624,13 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
               Provisioned room access for external recipients. Each recipient gets an invitation bootstrap and a room-scoped session.
             </p>
           </div>
-          <Button onClick={openExternalAccessModal} className="gap-2">
+          <Button onClick={openExternalAccessModal} className="w-full shrink-0 gap-2 sm:w-auto">
             <Mail className="h-4 w-4" />
             Invite External
           </Button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[860px] text-left text-sm">
             <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
               <tr>
                 <th className="px-6 py-4">Recipient</th>
@@ -751,7 +751,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
               placeholder="Financials"
             />
           </div>
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -928,7 +928,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
             </select>
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={() => setIsMemberModalOpen(false)}>Cancel</Button>
             <Button type="button" onClick={handleAddMember} disabled={isSubmitting || !memberUserId.trim()}>
               {isSubmitting ? 'Adding...' : 'Add Member'}
@@ -1004,7 +1004,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
             The invitation URL only bootstraps the room session. Durable access stays on the provisioned room grant.
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={() => setIsExternalAccessModalOpen(false)}>Cancel</Button>
             <Button type="button" onClick={handleProvisionExternalAccess} disabled={isSubmitting || !recipientEmail.trim()}>
               {isSubmitting ? 'Provisioning...' : 'Provision access'}

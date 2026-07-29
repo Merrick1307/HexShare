@@ -39,7 +39,7 @@ export function Activity() {
   }, []);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Activity</h1>
         <p className="mt-1 text-sm text-zinc-500">
@@ -59,7 +59,7 @@ export function Activity() {
             <ActivityIcon className="mb-3 h-8 w-8 text-zinc-300" />
             <p className="font-medium text-zinc-900">No recipient activity yet</p>
             <p className="mt-1">Share a document or invite someone to a room; verified views, downloads, and NDA acceptances will appear here.</p>
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
               <Link to="/dashboard" className="rounded-lg bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-700">Share a document</Link>
               <Link to="/groups" className="rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-700 hover:bg-zinc-50">Open rooms</Link>
             </div>
@@ -71,7 +71,7 @@ export function Activity() {
               const Icon = meta.icon;
               const target = item.document_name || item.room_name || '—';
               return (
-                <li key={index} className="flex items-center gap-4 px-6 py-3">
+                <li key={index} className="flex items-start gap-3 px-4 py-4 sm:items-center sm:gap-4 sm:px-6 sm:py-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600">
                     <Icon className="h-4 w-4" />
                   </div>
@@ -86,10 +86,12 @@ export function Activity() {
                       {item.room_name ? ` · ${item.room_name}` : ''}
                     </p>
                   </div>
-                  <Badge variant="neutral">{item.source === 'room' ? 'Room' : 'Link'}</Badge>
-                  <span className="w-40 shrink-0 text-right text-xs text-zinc-400">
-                    {format(new Date(item.timestamp), 'MMM d, yyyy h:mm a')}
-                  </span>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Badge variant="neutral">{item.source === 'room' ? 'Room' : 'Link'}</Badge>
+                    <span className="text-right text-[11px] text-zinc-400 sm:w-40 sm:text-xs">
+                      {format(new Date(item.timestamp), 'MMM d, yyyy h:mm a')}
+                    </span>
+                  </div>
                 </li>
               );
             })}

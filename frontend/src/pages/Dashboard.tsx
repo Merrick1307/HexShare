@@ -412,13 +412,13 @@ export function Dashboard({
   }, [links]);
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-6 sm:space-y-8">
+      <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Documents</h1>
           <p className="mt-1 text-sm text-zinc-500">Manage documents, generate share links, and inspect analytics.</p>
         </div>
-        <Button onClick={() => setIsUploadModalOpen(true)} className="gap-2">
+        <Button onClick={() => setIsUploadModalOpen(true)} className="w-full gap-2 sm:w-auto">
           <Upload className="h-4 w-4" />
           Upload Document
         </Button>
@@ -437,13 +437,13 @@ export function Dashboard({
         </div>
         {enableDocumentControls ? (
           <>
-            <label className="relative">
+            <label className="relative w-full sm:w-auto">
               <span className="sr-only">Filter by file type</span>
               <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <select
                 value={fileType}
                 onChange={(event) => setFileType(event.target.value as DocumentFileType)}
-                className="h-10 min-w-40 rounded-lg border border-zinc-300 bg-white py-2 pl-9 pr-8 text-sm text-zinc-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="h-10 w-full rounded-lg border border-zinc-300 bg-white py-2 pl-9 pr-8 text-sm text-zinc-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:min-w-40"
               >
                 <option value="all">All file types</option>
                 <option value="pdf">PDF</option>
@@ -455,7 +455,7 @@ export function Dashboard({
                 <option value="other">Other files</option>
               </select>
             </label>
-            <label>
+            <label className="w-full sm:w-auto">
               <span className="sr-only">Sort documents</span>
               <select
                 value={`${sortBy}:${sortDirection}`}
@@ -464,7 +464,7 @@ export function Dashboard({
                   setSortBy(nextSort);
                   setSortDirection(nextDirection);
                 }}
-                className="h-10 min-w-44 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:min-w-44"
               >
                 <option value="uploaded:desc">Newest uploaded</option>
                 <option value="uploaded:asc">Oldest uploaded</option>
@@ -485,8 +485,8 @@ export function Dashboard({
         </div>
       </div>
 
-      <div ref={containerRef} className="overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-sm max-h-[calc(100vh-16rem)]">
-        <table className="w-full text-left text-sm">
+      <div ref={containerRef} className="max-h-[calc(100vh-16rem)] overflow-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
+        <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
             <tr>
               <th className="px-6 py-3">
@@ -554,7 +554,7 @@ export function Dashboard({
                   ? doc.active_link_count
                   : docLinks.filter((link) => !link.revoked_at && new Date(link.expires_at) > new Date()).length;
                 return (
-                  <tr key={doc.id} className="group transition-colors hover:bg-zinc-50/50">
+                  <tr key={doc.id} className="group transition-colors hover:bg-zinc-50/50 dark:hover:bg-white/[0.04]">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} />
@@ -687,7 +687,7 @@ export function Dashboard({
               <span className="text-xs font-medium">Copy</span>
             </button>
           ) : null}
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -725,7 +725,7 @@ export function Dashboard({
               ))}
             </select>
           </div>
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={() => { setIsMoveModalOpen(false); setMoveError(null); }}>Cancel</Button>
             <Button type="button" onClick={handleMoveToGroup} disabled={isSubmitting}>
               {isSubmitting ? 'Moving...' : 'Move'}

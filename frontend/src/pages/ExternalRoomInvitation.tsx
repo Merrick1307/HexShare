@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import {
@@ -36,11 +37,13 @@ import { FileTypeIcon } from "../components/FileTypeIcon";
 
 export type ExternalRoomInvitationProps = {
   brandName?: string;
+  brandLogo?: ReactNode;
   homeHref?: string;
 };
 
 export function ExternalRoomInvitation({
   brandName = "Secure sharing",
+  brandLogo,
   homeHref = "/",
 }: ExternalRoomInvitationProps = {}) {
   const { token } = useParams<{ token: string }>();
@@ -275,7 +278,7 @@ export function ExternalRoomInvitation({
       <header className="border-b border-black/10 bg-[#f5f3ee]/90 backdrop-blur-xl dark:border-white/10 dark:bg-[#171818]/90">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link to={homeHref} className="flex items-center gap-3">
-            <HexLogo className="h-8 w-8" />
+            {brandLogo ?? <HexLogo className="h-8 w-8" />}
             <span className="text-lg font-semibold tracking-tight">
               {brandName}
             </span>

@@ -6,7 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { HexLogo } from '../components/ui/HexLogo';
 import { api } from '../services/api';
 
-export function Login({ productName = 'HexShare' }: { productName?: string }) {
+export function Login({
+  productName = 'HexShare',
+  brandLogo,
+}: {
+  productName?: string;
+  brandLogo?: React.ReactNode;
+}) {
   const [isLoading, setIsLoading] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
@@ -49,7 +55,7 @@ export function Login({ productName = 'HexShare' }: { productName?: string }) {
     <div className="flex min-h-screen flex-col justify-center bg-zinc-50 py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center">
         <Link to="/" className="mb-8 flex items-center gap-3 text-zinc-950">
-          <HexLogo className="h-12 w-12" />
+          {brandLogo ?? <HexLogo className="h-12 w-12" />}
           <span className="text-3xl font-semibold tracking-tight">{productName}</span>
         </Link>
       </div>

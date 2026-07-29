@@ -6,7 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { HexLogo } from '../components/ui/HexLogo';
 import { api } from '../services/api';
 
-export function Signup({ productName = 'HexShare' }: { productName?: string }) {
+export function Signup({
+  productName = 'HexShare',
+  brandLogo,
+}: {
+  productName?: string;
+  brandLogo?: React.ReactNode;
+}) {
   const [isLoading, setIsLoading] = useState(false);
 
   function handleSSOSignup() {
@@ -15,15 +21,15 @@ export function Signup({ productName = 'HexShare' }: { productName?: string }) {
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-zinc-50 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen flex-col justify-center bg-zinc-50 px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center">
-        <Link to="/" className="mb-8 flex items-center gap-3 text-zinc-950">
-          <HexLogo className="h-12 w-12" />
-          <span className="text-3xl font-semibold tracking-tight">{productName}</span>
+        <Link to="/" className="mb-6 flex items-center gap-3 text-zinc-950 sm:mb-8">
+          {brandLogo ?? <HexLogo className="h-12 w-12" />}
+          <span className="text-2xl font-semibold tracking-tight sm:text-3xl">{productName}</span>
         </Link>
       </div>
 
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+      <div className="w-full sm:mx-auto sm:max-w-md">
         <Card className="border-zinc-200 shadow-sm">
           <CardHeader className="space-y-1 text-center">
             <CardTitle className="text-2xl">Create a workspace</CardTitle>

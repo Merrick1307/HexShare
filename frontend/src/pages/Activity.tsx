@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
+import { parseApiDate } from '../lib/dateTime';
 import { Link } from 'react-router-dom';
 import { Activity as ActivityIcon, Download, Eye, FileText, FolderOpen, LogIn, ShieldCheck } from 'lucide-react';
 import { api } from '../services/api';
@@ -89,7 +90,7 @@ export function Activity() {
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <Badge variant="neutral">{item.source === 'room' ? 'Room' : 'Link'}</Badge>
                     <span className="text-right text-[11px] text-zinc-400 sm:w-40 sm:text-xs">
-                      {format(new Date(item.timestamp), 'MMM d, yyyy h:mm a')}
+                      {format(parseApiDate(item.timestamp), 'MMM d, yyyy h:mm a')}
                     </span>
                   </div>
                 </li>

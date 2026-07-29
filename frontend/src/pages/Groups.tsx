@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
+import { parseApiDate } from '../lib/dateTime';
 import { Folder, Plus, MoreHorizontal, Pencil, Search, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { DocumentGroup } from '../types';
@@ -295,7 +296,7 @@ export function Groups() {
                     </div>
                   </td>
                   <td className="px-6 py-4 text-zinc-600">{group.description || <span className="text-zinc-400">-</span>}</td>
-                  <td className="px-6 py-4 text-zinc-600">{format(new Date(group.created_at), 'MMM d, yyyy')}</td>
+                  <td className="px-6 py-4 text-zinc-600">{format(parseApiDate(group.created_at), 'MMM d, yyyy')}</td>
                   <td className="px-6 py-4 text-right">
                     <GroupRowMenu
                       group={group}

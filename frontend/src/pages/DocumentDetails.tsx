@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
+import { parseApiDate } from '../lib/dateTime';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -28,7 +29,7 @@ import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis
 
 function statusForLink(link: ShareLink) {
   if (link.revoked_at) return { label: 'Revoked', variant: 'danger' as const };
-  if (new Date(link.expires_at) <= new Date()) return { label: 'Expired', variant: 'warning' as const };
+  if (parseApiDate(link.expires_at) <= new Date()) return { label: 'Expired', variant: 'warning' as const };
   return { label: 'Active', variant: 'success' as const };
 }
 
@@ -144,7 +145,7 @@ export function DocumentDetails() {
     window.setTimeout(() => setCopiedValue(null), 1500);
   }
 
-  const activeCount = useMemo(() => links.filter((link) => !link.revoked_at && new Date(link.expires_at) > new Date()).length, [links]);
+  const activeCount = useMemo(() => links.filter((link) => !link.revoked_at && parseApiDate(link.expires_at) > new Date()).length, [links]);
   const chartData = useMemo(
     () =>
       (analytics?.pages || []).map((page) => ({
@@ -165,7 +166,7 @@ export function DocumentDetails() {
         <Link to="/dashboard" className="text-zinc-400 transition-colors hover:text-zinc-900"><ArrowLeft className="h-5 w-5" /></Link>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{document.name}</h1>
-          <p className="mt-1 text-sm text-zinc-500">Uploaded {format(new Date(document.created_at), 'MMM d, yyyy')} · {formatBytes(document.size)}</p>
+          <p className="mt-1 text-sm text-zinc-500">Uploaded {format(parseApiDate(document.created_at), 'MMM d, yyyy')} · {formatBytes(document.size)}</p>
         </div>
       </div>
 
@@ -211,7 +212,7 @@ export function DocumentDetails() {
                                 <Badge variant={status.variant}>{status.label}</Badge>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                                <span>Expires {format(new Date(link.expires_at), 'MMM d, yyyy h:mm a')}</span>
+                                <span>Expires {format(parseApiDate(link.expires_at), 'MMM d, yyyy h:mm a')}</span>
                                 {link.can_download ? <Badge variant="neutral">Download</Badge> : null}
                                 {link.can_print ? <Badge variant="neutral">Print</Badge> : null}
                                 {link.require_email ? <Badge variant="neutral">Email required</Badge> : null}

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
+import { parseApiDate } from '../lib/dateTime';
 import {
   ArrowDown,
   ArrowUp,
@@ -552,7 +553,7 @@ export function Dashboard({
                   : docLinks.length;
                 const activeLinks = enableDocumentControls && doc.active_link_count !== undefined
                   ? doc.active_link_count
-                  : docLinks.filter((link) => !link.revoked_at && new Date(link.expires_at) > new Date()).length;
+                  : docLinks.filter((link) => !link.revoked_at && parseApiDate(link.expires_at) > new Date()).length;
                 return (
                   <tr key={doc.id} className="group transition-colors hover:bg-zinc-50/50 dark:hover:bg-white/[0.04]">
                     <td className="px-6 py-4">
@@ -565,7 +566,7 @@ export function Dashboard({
                       </div>
                     </td>
                     <td className="px-6 py-4 text-zinc-600">{formatBytes(doc.size)}</td>
-                    <td className="px-6 py-4 text-zinc-600">{format(new Date(doc.created_at), 'MMM d, yyyy')}</td>
+                    <td className="px-6 py-4 text-zinc-600">{format(parseApiDate(doc.created_at), 'MMM d, yyyy')}</td>
                     <td className="px-6 py-4">
                       {totalLinks > 0 ? (
                         <div className="flex items-center gap-2">

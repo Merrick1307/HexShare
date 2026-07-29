@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Document, DocumentGroup, ExternalRoomGrant, ProvisionExternalRoomAccessResponse, RoomSection } from '../types';
+import { parseApiDate } from '../lib/dateTime';
 import { formatBytes } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -39,7 +40,7 @@ type WorkspaceUser = { id: string; user_id?: string; email?: string; name?: stri
 
 function statusForGrant(grant: ExternalRoomGrant) {
   if (grant.revoked_at) return { label: 'Revoked', variant: 'danger' as const };
-  if (grant.expires_at && new Date(grant.expires_at) <= new Date()) return { label: 'Expired', variant: 'warning' as const };
+  if (grant.expires_at && parseApiDate(grant.expires_at) <= new Date()) return { label: 'Expired', variant: 'warning' as const };
   return { label: 'Active', variant: 'success' as const };
 }
 
@@ -157,7 +158,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
   const totalPages = Math.ceil(usersTotal / PAGE_SIZE);
 
   const activeExternalAccessCount = useMemo(
-    () => externalAccess.filter((grant) => !grant.revoked_at && (!grant.expires_at || new Date(grant.expires_at) > new Date())).length,
+    () => externalAccess.filter((grant) => !grant.revoked_at && (!grant.expires_at || parseApiDate(grant.expires_at) > new Date())).length,
     [externalAccess]
   );
 
@@ -590,7 +591,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                       <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} size="sm" />
                       <div className="min-w-0 flex-1">
                         <Link to={`/documents/${doc.id}`} className="truncate font-medium text-zinc-900 hover:text-indigo-600 hover:underline">{doc.name}</Link>
-                        <p className="text-xs text-zinc-500">{formatBytes(doc.size)} · {doc.protection?.label} · {format(new Date(doc.created_at), 'MMM d, yyyy')}</p>
+                        <p className="text-xs text-zinc-500">{formatBytes(doc.size)} · {doc.protection?.label} · {format(parseApiDate(doc.created_at), 'MMM d, yyyy')}</p>
                       </div>
                       <select
                         aria-label={`Move ${doc.name} to section`}
@@ -671,9 +672,9 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                       </td>
                       <td className="px-6 py-4 text-zinc-600">
                         <div className="space-y-1">
-                          <p>Granted {format(new Date(grant.granted_at), 'MMM d, yyyy')}</p>
+                          <p>Granted {format(parseApiDate(grant.granted_at), 'MMM d, yyyy')}</p>
                           <p className="text-xs text-zinc-500">
-                            {grant.expires_at ? `Expires ${format(new Date(grant.expires_at), 'MMM d, yyyy h:mm a')}` : 'No grant expiry'}
+                            {grant.expires_at ? `Expires ${format(parseApiDate(grant.expires_at), 'MMM d, yyyy h:mm a')}` : 'No grant expiry'}
                           </p>
                         </div>
                       </td>
@@ -687,8 +688,8 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                               type="button"
                               variant="outline"
                               size="sm"
-                              disabled={!!grant.resend_available_at && new Date(grant.resend_available_at) > new Date()}
-                              title={grant.resend_available_at ? `Available ${format(new Date(grant.resend_available_at), 'MMM d, h:mm a')}` : undefined}
+                              disabled={!!grant.resend_available_at && parseApiDate(grant.resend_available_at) > new Date()}
+                              title={grant.resend_available_at ? `Available ${format(parseApiDate(grant.resend_available_at), 'MMM d, h:mm a')}` : undefined}
                               onClick={() => {
                                 setRotateInvitationError(null);
                                 setRotateInvitationTarget({ grant, delivery: 'email' });
@@ -700,7 +701,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                               type="button"
                               variant="outline"
                               size="sm"
-                              disabled={!!grant.resend_available_at && new Date(grant.resend_available_at) > new Date()}
+                              disabled={!!grant.resend_available_at && parseApiDate(grant.resend_available_at) > new Date()}
                               onClick={() => {
                                 setRotateInvitationError(null);
                                 setRotateInvitationTarget({ grant, delivery: 'return_link' });

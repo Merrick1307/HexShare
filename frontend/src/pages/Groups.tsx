@@ -223,13 +223,13 @@ export function Groups() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-6 sm:space-y-8">
+      <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Rooms</h1>
           <p className="mt-1 text-sm text-zinc-500">Organize documents into controlled shared spaces.</p>
         </div>
-        <Button onClick={() => { setFormData({ name: '', description: '' }); setModalError(null); setIsCreateModalOpen(true); }} className="gap-2">
+        <Button onClick={() => { setFormData({ name: '', description: '' }); setModalError(null); setIsCreateModalOpen(true); }} className="w-full gap-2 sm:w-auto">
           <Plus className="h-4 w-4" />
           New Room
         </Button>
@@ -238,7 +238,7 @@ export function Groups() {
       {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div>}
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="relative max-w-md">
+      <div className="relative w-full max-w-md">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
         <Input
           className="pl-9"
@@ -248,8 +248,8 @@ export function Groups() {
         />
       </div>
 
-      <div ref={containerRef} className="overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-sm max-h-[calc(100vh-16rem)]">
-        <table className="w-full text-left text-sm">
+      <div ref={containerRef} className="max-h-[calc(100vh-16rem)] overflow-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
+        <table className="w-full min-w-[680px] text-left text-sm">
           <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
             <tr>
               <th className="px-6 py-4">Name</th>
@@ -283,7 +283,7 @@ export function Groups() {
               </tr>
             ) : (
               groups.map((group) => (
-                <tr key={group.id} className="group transition-colors hover:bg-zinc-50/50">
+                <tr key={group.id} className="group transition-colors hover:bg-zinc-50/50 dark:hover:bg-white/[0.04]">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
@@ -327,7 +327,7 @@ export function Groups() {
             <label className="text-sm font-medium text-zinc-900">Description (optional)</label>
             <Input className="mt-1.5" value={formData.description} onChange={(e) => setFormData((d) => ({ ...d, description: e.target.value }))} />
           </div>
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={() => { setIsCreateModalOpen(false); setModalError(null); }}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Create'}</Button>
           </div>
@@ -345,7 +345,7 @@ export function Groups() {
             <label className="text-sm font-medium text-zinc-900">Description</label>
             <Input className="mt-1.5" value={formData.description} onChange={(e) => setFormData((d) => ({ ...d, description: e.target.value }))} />
           </div>
-          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex flex-col-reverse gap-3 border-t border-zinc-100 pt-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" onClick={() => { setIsEditModalOpen(false); setModalError(null); }}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save'}</Button>
           </div>

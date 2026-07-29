@@ -117,7 +117,7 @@ export function Ndas() {
   }, []);
 
   return (
-    <div className="space-y-8 text-foreground">
+    <div className="space-y-6 text-foreground sm:space-y-8">
       <div>
         <p className="text-primary text-xs font-semibold uppercase tracking-[0.18em]">
           Agreements and acceptance
@@ -172,7 +172,7 @@ export function Ndas() {
                     Agreements may be text or PDF. A renderable PDF receives the strongest
                     protected-viewing treatment when shared as a document.
                   </p>
-                  <div className="mt-4 flex justify-center gap-3">
+                  <div className="mt-4 flex flex-col justify-center gap-3 sm:flex-row">
                     <Link to="/groups" className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">Create a room</Link>
                     <Link to="/dashboard" className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50">Upload a document</Link>
                   </div>

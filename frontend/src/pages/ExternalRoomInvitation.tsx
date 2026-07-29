@@ -20,6 +20,7 @@ import {
   NdaStatus,
   RoomSection,
 } from "../types";
+import { parseApiDate } from "../lib/dateTime";
 import { formatBytes } from "../lib/utils";
 import {
   Card,
@@ -413,7 +414,7 @@ export function ExternalRoomInvitation({
                   <span className="font-medium text-[#101522] dark:text-[#f3f1eb]">
                     {inspection?.expires_at
                       ? format(
-                          new Date(inspection.expires_at),
+                          parseApiDate(inspection.expires_at),
                           "MMM d, yyyy h:mm a",
                         )
                       : "after its configured access window"}
@@ -557,7 +558,7 @@ export function ExternalRoomInvitation({
                                 <span>
                                   Uploaded{" "}
                                   {format(
-                                    new Date(document.created_at),
+                                    parseApiDate(document.created_at),
                                     "MMM d, yyyy",
                                   )}
                                 </span>

@@ -92,6 +92,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
+import { parseApiDate } from "../lib/dateTime";
 import { FileText, FolderOpen, ShieldCheck } from "lucide-react";
 import { api } from "../services/api";
 import { NdaPolicySummary } from "../types";
@@ -225,7 +226,7 @@ export function Ndas() {
                       </Badge>
                     </td>
                     <td className="text-muted-foreground px-6 py-4">
-                      {format(new Date(policy.updated_at), "MMM d, yyyy")}
+                      {format(parseApiDate(policy.updated_at), "MMM d, yyyy")}
                     </td>
                   </tr>
                 );

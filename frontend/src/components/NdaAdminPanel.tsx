@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FileText, ShieldCheck, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { NdaAcceptanceRecord, NdaPolicyAdminView } from '../types';
+import { parseApiDate } from '../lib/dateTime';
 import { Button } from './ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/Card';
 import { Input } from './ui/Input';
@@ -229,7 +230,7 @@ export function NdaAdminPanel({ scope, id }: NdaAdminPanelProps) {
                           {a.typed_name || a.subject_id} {a.presented_email ? `· ${a.presented_email}` : ''}
                         </span>
                         <span className="text-xs text-zinc-500">
-                          v{a.nda_version} · {new Date(a.accepted_at).toLocaleString()}
+                          v{a.nda_version} · {parseApiDate(a.accepted_at).toLocaleString()}
                         </span>
                       </li>
                     ))}

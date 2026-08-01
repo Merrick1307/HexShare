@@ -28,6 +28,7 @@ from app.auth.external_room_auth import get_external_room_principal
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import get_tenant_auth
 from app.core.authz import EXTERNAL_AUTH_COOKIE, EXTERNAL_REFRESH_COOKIE, ResourceAction
+from app.core.http_safety import client_ip_from_request
 from app.core.watermark_identity import pseudonymous_watermark
 from app.domain import Document, DocumentGroup, NdaContentType, NdaScopeType, ShareLink
 from app.ports.access_control import AccessDenied
@@ -161,7 +162,7 @@ def build_router() -> APIRouter:
                 typed_name=payload.typed_name,
                 scroll_confirmed=payload.scroll_confirmed,
                 checkbox_confirmed=payload.checkbox_confirmed,
-                ip_address=request.client.host if request.client else None,
+                ip_address=client_ip_from_request(request),
                 user_agent=request.headers.get("user-agent"),
             )
         except NdaError as exc:
@@ -221,7 +222,7 @@ def build_router() -> APIRouter:
                 document_id=claims.document_id,
                 link_id=claims.link_id,
                 email=payload.email,
-                ip_address=request.client.host if request.client else None,
+                ip_address=client_ip_from_request(request),
                 user_agent=request.headers.get("user-agent"),
             )
             delivery = await viewer_service.describe_view_session_delivery(

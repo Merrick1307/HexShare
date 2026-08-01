@@ -668,6 +668,7 @@ export const api = {
   async createExternalRoomSession(token: string, email: string): Promise<ExternalRoomSession> {
     return fetchPublic<ExternalRoomSession>(`${API_PREFIX}/external-room/invitations/${encodeURIComponent(token)}/sessions`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });

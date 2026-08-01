@@ -11,6 +11,7 @@ from app.api.dependencies.services import (
     get_policy_loader,
     get_rate_limit_backend,
 )
+from app.core.http_safety import client_ip_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _subject_from_request(request: Request) -> str:
     elif user_id:
         return f"user:{user_id}"
     else:
-        ip = request.client.host if request.client else "unknown"
+        ip = client_ip_from_request(request) or "unknown"
         return f"ip:{ip}"
 
 

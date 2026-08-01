@@ -28,6 +28,8 @@ from app.api.routes.uploads import build_router as build_uploads_router
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import TenantAuthDependency
 from app.auth.external_room_auth import ExternalRoomAuthDependency
+from app.api.routes.health import build_router as build_health_router
+from app.core.http_safety import install_sensitive_access_log_filter
 from app.infra.factories import (
     AccessControlFactory,
     AuthenticatorFactory,
@@ -264,12 +266,14 @@ def create_app(*args, **kwargs) -> FastAPI:
 
     from app.services import NdaAcceptanceRequired
 
+    install_sensitive_access_log_filter()
     app = FastAPI(title="HexShare", version="0.2.0", lifespan=lifespan)
 
     @app.exception_handler(NdaAcceptanceRequired)
     async def _nda_required_handler(_request, exc: NdaAcceptanceRequired):
         return JSONResponse(status_code=403, content={"detail": exc.detail})
 
+    app.include_router(build_health_router())
     app.include_router(api_router(), prefix="/api/v1")
     # app.include_router(build_uploads_router(), prefix="/api/v1")
 

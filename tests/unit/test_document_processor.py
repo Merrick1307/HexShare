@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import io
+import threading
 
 import pytest
 from PIL import Image
@@ -109,6 +111,64 @@ async def test_render_pdf_page_returns_watermarked_png(monkeypatch):
     output = Image.open(io.BytesIO(result.content)).convert("RGBA")
     assert output.size == (result.width, result.height)
     assert output.getbbox() is not None
+
+
+@pytest.mark.asyncio
+async def test_render_pdf_pages_from_same_cached_document_concurrently(monkeypatch):
+    processor = DocumentProcessor()
+    render_barrier = threading.Barrier(2)
+
+    class FakePage:
+        width = 100.0
+        height = 100.0
+
+    class FakePdfDocument:
+        @classmethod
+        def from_bytes(cls, content: bytes):
+            return cls()
+
+        def page_count(self) -> int:
+            return 2
+
+        def page(self, index: int) -> FakePage:
+            return FakePage()
+
+        def render_page_fit(self, page: int, width: int, height: int, **kwargs) -> bytes:
+            render_barrier.wait(timeout=5)
+            image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            return buffer.getvalue()
+
+    monkeypatch.setattr(processor, "_load_pdf_document_class", lambda: FakePdfDocument)
+    await processor.describe_pdf_preview(content=b"%PDF-1.7", cache_key="report")
+
+    first, second = await asyncio.gather(
+        processor.render_pdf_page(
+            context=_context(
+                filename="report.pdf",
+                source_media_type="application/pdf",
+                watermark_text=None,
+            ),
+            content=b"%PDF-1.7",
+            page_number=1,
+            render_width=400,
+            cache_key="report",
+        ),
+        processor.render_pdf_page(
+            context=_context(
+                filename="report.pdf",
+                source_media_type="application/pdf",
+                watermark_text=None,
+            ),
+            content=b"%PDF-1.7",
+            page_number=2,
+            render_width=400,
+            cache_key="report",
+        ),
+    )
+
+    assert (first.page_number, second.page_number) == (1, 2)
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,6 @@ from app.adapters.rate_limiting.backends import (
 )
 from app.adapters.oidc import GoogleOIDCClient, HexIAMOIDCClient
 from app.api.router import api_router
-from app.api.routes.uploads import build_router as build_uploads_router
 from app.auth.share_token_auth import ShareTokenDependency
 from app.auth.tenant_auth import TenantAuthDependency
 from app.auth.external_room_auth import ExternalRoomAuthDependency

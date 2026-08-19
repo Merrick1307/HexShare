@@ -62,7 +62,6 @@ class RenderedPage:
 @dataclass
 class _CachedPdfDocument:
     document: object
-    lock: asyncio.Lock
 
 
 class _PdfDocumentCache:
@@ -233,7 +232,11 @@ class DocumentProcessor:
             case "code":
                 return await self._process_code(context=context, content=content)
             case "image":
-                return await self._process_image(context=context, content=content)
+                return await asyncio.to_thread(
+                    self._process_image_sync,
+                    context=context,
+                    content=content,
+                )
             case "docx":
                 return await self._process_docx_view(context=context, content=content)
             case _:
@@ -245,8 +248,7 @@ class DocumentProcessor:
             raise DocumentProcessingError("inline_view_backend_unavailable")
 
         cached_document = await self._get_pdf_document(content=content, cache_key=cache_key, PdfDocument=PdfDocument)
-        async with cached_document.lock:
-            page_count = await asyncio.to_thread(self._get_pdf_page_count_sync, document=cached_document.document)
+        page_count = await asyncio.to_thread(self._get_pdf_page_count_sync, document=cached_document.document)
         return PdfPreview(page_count=page_count)
 
     async def render_pdf_page(
@@ -270,17 +272,16 @@ class DocumentProcessor:
         cached_document = await self._get_pdf_document(content=content, cache_key=cache_key, PdfDocument=PdfDocument)
 
         target_width = self._clamp_render_width(render_width)
-        async with cached_document.lock:
-            return await asyncio.to_thread(
-                self._render_pdf_page_sync,
-                document=cached_document.document,
-                page_number=page_number,
-                target_width=target_width,
-                watermark_text=context.watermark_text,
-                Image=Image,
-                ImageDraw=ImageDraw,
-                ImageFont=ImageFont,
-            )
+        return await asyncio.to_thread(
+            self._render_pdf_page_sync,
+            document=cached_document.document,
+            page_number=page_number,
+            target_width=target_width,
+            watermark_text=context.watermark_text,
+            Image=Image,
+            ImageDraw=ImageDraw,
+            ImageFont=ImageFont,
+        )
 
     async def process_for_download(
         self,
@@ -368,7 +369,7 @@ class DocumentProcessor:
             heading=f"{context.filename} (Code Preview)",
         )
 
-    async def _process_image(
+    def _process_image_sync(
         self,
         *,
         context: ProcessingContext,
@@ -447,7 +448,7 @@ class DocumentProcessor:
             if cached is not None:
                 return cached
         document = await asyncio.to_thread(PdfDocument.from_bytes, content)
-        cached_document = _CachedPdfDocument(document=document, lock=asyncio.Lock())
+        cached_document = _CachedPdfDocument(document=document)
         if cache_key:
             await self._pdf_cache.set(cache_key, cached_document)
         return cached_document

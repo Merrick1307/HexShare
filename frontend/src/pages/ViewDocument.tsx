@@ -8,6 +8,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { NdaGate } from '../components/NdaGate';
+import { useActivePdfPage } from '../hooks/useActivePdfPage';
 
 type ViewerStatus = 'active' | 'revoked' | 'expired' | 'closed' | 'not_found';
 
@@ -124,6 +125,7 @@ export function ViewDocument() {
   const [activePage, setActivePage] = useState(1);
   const [pdfRenderWidth, setPdfRenderWidth] = useState(() => buildPdfRenderWidth());
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const pdfScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const isOpeningSessionRef = useRef(false);
   const prefetchedPagesRef = useRef<Set<string>>(new Set());
   const [ndaStatuses, setNdaStatuses] = useState<NdaStatus[]>([]);
@@ -335,31 +337,13 @@ export function ViewDocument() {
     };
   }, [session, viewerStatus, ndaBlocked]);
 
-  useEffect(() => {
-    if (preview.kind !== 'pdf_pages') return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visiblePages = entries
-          .filter((entry) => entry.isIntersecting)
-          .map((entry) => Number((entry.target as HTMLElement).dataset.pageNumber || '1'))
-          .filter((pageNumber) => Number.isFinite(pageNumber))
-          .sort((left, right) => left - right);
-        if (visiblePages.length > 0) {
-          setActivePage(visiblePages[0]);
-        }
-      },
-      {
-        threshold: 0.6,
-      }
-    );
-
-    (Object.values(pageRefs.current) as Array<HTMLDivElement | null>).forEach((element) => {
-      if (element) observer.observe(element);
-    });
-
-    return () => observer.disconnect();
-  }, [preview, pdfRenderWidth]);
+  useActivePdfPage({
+    enabled: preview.kind === 'pdf_pages',
+    layoutKey: preview,
+    pageRefs,
+    scrollContainerRef: pdfScrollContainerRef,
+    onActivePageChange: setActivePage,
+  });
 
   useEffect(() => {
     if (preview.kind !== 'pdf_pages' || viewerStatus !== 'active') return;
@@ -469,7 +453,7 @@ export function ViewDocument() {
     if (preview.kind === 'pdf_pages') {
       const pages = Array.from({ length: preview.pageCount }, (_, index) => index + 1);
       return (
-        <div className="h-full w-full overflow-auto bg-zinc-200">
+        <div ref={pdfScrollContainerRef} className="h-full w-full overflow-auto bg-zinc-200">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-4 md:px-6 md:py-6">
             {pages.map((pageNumber) => (
               <React.Fragment key={pageNumber}>

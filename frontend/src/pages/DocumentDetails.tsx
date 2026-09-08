@@ -77,6 +77,38 @@ export function DocumentDetails() {
     return () => window.clearTimeout(timer);
   }, [infoMessage]);
 
+  useEffect(() => {
+    if (!id) return;
+
+    let cancelled = false;
+    let requestInFlight = false;
+
+    const refreshAnalytics = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const nextAnalytics = await api.getAnalytics(id);
+        if (!cancelled) setAnalytics(nextAnalytics);
+      } catch {
+        // Keep the last successful snapshot when a background refresh fails.
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    const refreshWhenVisible = () => {
+      if (window.document.visibilityState === 'visible') void refreshAnalytics();
+    };
+
+    window.addEventListener('focus', refreshWhenVisible);
+    window.document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refreshWhenVisible);
+      window.document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [id]);
+
   async function loadData(docId: string) {
     setIsLoading(true);
     setPageError(null);

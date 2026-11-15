@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Building2 } from 'lucide-react';
-import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { HexLogo } from '../components/ui/HexLogo';
 import { api } from '../services/api';
+import { IdentityProviderButton } from '../components/IdentityProviderButton';
+import { useAuthConfig } from '../hooks/useAuthConfig';
 
 export function Signup({
   productName = 'HexShare',
@@ -14,6 +14,7 @@ export function Signup({
   brandLogo?: React.ReactNode;
 }) {
   const [isLoading, setIsLoading] = useState(false);
+  const authConfig = useAuthConfig();
 
   function handleSSOSignup() {
     setIsLoading(true);
@@ -38,21 +39,17 @@ export function Signup({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-              <div className="flex items-start gap-3">
-                <Building2 className="mt-0.5 h-4 w-4 text-zinc-400" />
-                <p>You will be redirected to the configured identity provider to continue.</p>
-              </div>
-            </div>
+            <IdentityProviderButton
+              provider={authConfig?.provider}
+              isLoading={isLoading}
+              fallbackLabel="Continue to signup"
+              onClick={handleSSOSignup}
+            />
             <p className="text-center text-xs leading-relaxed text-zinc-500">
               Upload common business documents after signup. PDF provides the strongest
               recipient-watermarked viewer; other accepted formats show their protection
               level before sharing.
             </p>
-            <Button type="button" className="w-full gap-2" disabled={isLoading} onClick={handleSSOSignup}>
-              {isLoading ? 'Redirecting...' : 'Continue to signup'}
-              <ArrowRight className="h-4 w-4" />
-            </Button>
           </CardContent>
         </Card>
       </div>

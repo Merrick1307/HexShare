@@ -66,15 +66,23 @@ def build_router() -> APIRouter:
 
     @router.get("/auth/config")
     async def auth_config(request: Request):
-        """Public, unauthenticated capability flags for the login UI.
-
-        Lets the frontend decide whether to offer the credential-free demo
-        login without baking the decision into the build.
-        """
+        """Public capabilities and branding for the default identity provider."""
+        default_idp = getattr(request.app.state, "default_oidc_idp", "hexiam")
+        display_name = os.getenv("HEXSHARE_OIDC_DISPLAY_NAME", "").strip()
+        if not display_name:
+            display_name = {"google": "Google", "hexiam": "HexIAM"}.get(default_idp, default_idp)
+        logo_url = os.getenv("HEXSHARE_OIDC_LOGO_URL", "").strip() or None
+        if not logo_url and default_idp == "google":
+            logo_url = "https://www.gstatic.com/images/branding/googleg/1x/googleg_standard_color_128dp.png"
         return JSONResponse(
             {
                 "demo_mode": bool(getattr(request.app.state, "demo_mode", False)),
-                "default_idp": getattr(request.app.state, "default_oidc_idp", "hexiam"),
+                "default_idp": default_idp,
+                "provider": {
+                    "id": default_idp,
+                    "display_name": display_name,
+                    "logo_url": logo_url,
+                },
             }
         )
 

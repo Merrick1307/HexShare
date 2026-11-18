@@ -40,12 +40,14 @@ export type ExternalRoomInvitationProps = {
   brandName?: string;
   brandLogo?: ReactNode;
   homeHref?: string;
+  renderQuestions?: (roomId: string) => ReactNode;
 };
 
 export function ExternalRoomInvitation({
   brandName = "Secure sharing",
   brandLogo,
   homeHref = "/",
+  renderQuestions,
 }: ExternalRoomInvitationProps = {}) {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
@@ -531,6 +533,7 @@ export function ExternalRoomInvitation({
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="max-h-[34rem] space-y-3 overflow-y-auto">
+                  {renderQuestions?.(context.room_id)}
                   {documents.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-black/10 px-6 py-10 text-center text-sm text-[#7a808a] dark:border-white/10 dark:text-zinc-500">
                       No documents are currently visible in this room.

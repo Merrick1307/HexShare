@@ -46,7 +46,7 @@ function statusForGrant(grant: ExternalRoomGrant) {
 
 type RoomAdminTab = 'home' | 'documents' | 'external-parties';
 
-export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: boolean } = {}) {
+export function GroupDetails({ tabbedAdminView = false, renderQuestions }: { tabbedAdminView?: boolean; renderQuestions?: (scope: { documentId?: string; sectionId?: string }) => React.ReactNode } = {}) {
   const { id } = useParams<{ id: string }>();
   const [group, setGroup] = useState<DocumentGroup | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -568,6 +568,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
                 <div>
                   <h3 className="font-medium text-zinc-900">{bucket.name}</h3>
+                  {bucket.id && renderQuestions?.({ sectionId: bucket.id })}
                   <p className="text-xs text-zinc-500">{bucketDocuments.length} document{bucketDocuments.length === 1 ? '' : 's'}</p>
                 </div>
                 <div className="flex items-center gap-1">
@@ -588,6 +589,7 @@ export function GroupDetails({ tabbedAdminView = false }: { tabbedAdminView?: bo
                 <ul className="divide-y divide-zinc-100">
                   {bucketDocuments.map((doc, index) => (
                     <li key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      {renderQuestions?.({ documentId: doc.id })}
                       <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} size="sm" />
                       <div className="min-w-0 flex-1">
                         <Link to={`/documents/${doc.id}`} className="truncate font-medium text-zinc-900 hover:text-indigo-600 hover:underline">{doc.name}</Link>

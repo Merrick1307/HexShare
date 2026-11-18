@@ -232,6 +232,7 @@ export const api = {
   },
 
   async logout(): Promise<void> {
+    window.dispatchEvent(new Event('hexshare:logout'));
     await fetch(`${AUTH_PREFIX}/auth/logout`, {
       method: 'POST',
       credentials: 'include',
@@ -753,6 +754,7 @@ export const api = {
   },
 
   async logoutExternalRoom(): Promise<void> {
+    window.dispatchEvent(new Event('hexshare:logout'));
     await fetchExternal<void>(`${API_PREFIX}/external-room/logout`, { method: 'POST' });
   },
 

@@ -1095,7 +1095,7 @@ class PostgresStorage(StoragePort):
             SET room_id = $3,
                 room_section_id = NULL,
                 room_position = CASE
-                    WHEN $3 IS NULL THEN 0
+                    WHEN $3::text IS NULL THEN 0
                     ELSE (
                         SELECT COUNT(*) FROM documents target
                         WHERE target.tenant_id = $1 AND target.room_id = $3

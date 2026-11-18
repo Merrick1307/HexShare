@@ -41,6 +41,7 @@ export type ExternalRoomInvitationProps = {
   brandLogo?: ReactNode;
   homeHref?: string;
   renderQuestions?: (roomId: string) => ReactNode;
+  renderRoomContent?: (context: ExternalRoomContext, documents: Document[], sections: RoomSection[]) => ReactNode;
 };
 
 export function ExternalRoomInvitation({
@@ -48,6 +49,7 @@ export function ExternalRoomInvitation({
   brandLogo,
   homeHref = "/",
   renderQuestions,
+  renderRoomContent,
 }: ExternalRoomInvitationProps = {}) {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
@@ -522,7 +524,7 @@ export function ExternalRoomInvitation({
                 }
                 onAccept={handleAcceptRoomNda}
               />
-            ) : (
+            ) : renderRoomContent ? renderRoomContent(context, documents, sections) : (
               <Card className="border-black/10 bg-white/80 dark:border-white/10 dark:bg-[#202120]">
                 <CardHeader>
                   <CardTitle className="text-[#101522] dark:text-[#f3f1eb]">

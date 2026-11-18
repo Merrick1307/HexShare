@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import { ArrowLeft, Download, FileText, Lock, Printer } from 'lucide-react';
 import { api } from '../services/api';
@@ -55,11 +55,13 @@ interface LazyPdfPageProps {
   pathTemplate: string;
   pdfRenderWidth: number;
   documentName: string;
+  fitPage: boolean;
   onRef: (el: HTMLDivElement | null, pageNumber: number) => void;
 }
 
-function LazyPdfPage({ pageNumber, pathTemplate, pdfRenderWidth, documentName, onRef }: LazyPdfPageProps) {
+function LazyPdfPage({ pageNumber, pathTemplate, pdfRenderWidth, documentName, fitPage, onRef }: LazyPdfPageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [aspectRatio, setAspectRatio] = useState(8.5 / 11);
   const [isVisible, setIsVisible] = useState(pageNumber === 1);
 
   useEffect(() => {
@@ -87,15 +89,16 @@ function LazyPdfPage({ pageNumber, pathTemplate, pdfRenderWidth, documentName, o
         onRef(element, pageNumber);
       }}
       data-page-number={pageNumber}
-      className="mx-auto flex w-full max-w-5xl flex-col gap-2"
+      className="mx-auto flex w-full flex-col gap-2"
     >
       <div className="text-center text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Page {pageNumber}</div>
-      <div className="relative w-full overflow-hidden rounded-sm bg-white shadow-2xl [aspect-ratio:8.5/11]">
+      <div className="relative mx-auto w-full overflow-hidden rounded-sm bg-white shadow-2xl" style={{ aspectRatio, maxWidth: fitPage ? `calc((100dvh - 190px) * ${aspectRatio})` : undefined }}>
         {isVisible ? (
           <img
             src={buildPdfPageUrl(pathTemplate, pageNumber, pdfRenderWidth)}
             alt={`${documentName} page ${pageNumber}`}
             className="absolute inset-0 h-full w-full object-contain"
+            onLoad={event => setAspectRatio(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight)}
           />
         ) : (
           <PdfPagePlaceholder />
@@ -106,6 +109,9 @@ function LazyPdfPage({ pageNumber, pathTemplate, pdfRenderWidth, documentName, o
 }
 
 export function ExternalRoomViewer() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [zoom, setZoom] = useState('fit-width');
   const { sessionId } = useParams<{ sessionId: string }>();
   const [session, setSession] = useState<ExternalRoomDocumentSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -308,14 +314,15 @@ export function ExternalRoomViewer() {
       const pages = Array.from({ length: preview.pageCount }, (_, index) => index + 1);
       return (
         <div ref={pdfScrollContainerRef} className="h-full w-full overflow-auto bg-zinc-200">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-4 md:px-6 md:py-6">
+          <div className="mx-auto flex flex-col gap-6 px-3 py-4 md:px-6 md:py-6" style={{ width: zoom.startsWith('fit') ? '100%' : `${Number(zoom) * 10}px` }}>
             {pages.map((pageNumber) => (
               <React.Fragment key={pageNumber}>
                 <LazyPdfPage
                   pageNumber={pageNumber}
                   pathTemplate={preview.pathTemplate}
-                  pdfRenderWidth={pdfRenderWidth}
+                  pdfRenderWidth={zoom.startsWith('fit') ? pdfRenderWidth : Math.max(400, Math.min(4000, Math.round(Number(zoom) * 10 * Math.max(window.devicePixelRatio || 1, 1))))}
                   documentName={session.document_name}
+                  fitPage={zoom === 'fit-page'}
                   onRef={(element, observedPageNumber) => {
                     pageRefs.current[observedPageNumber] = element;
                   }}
@@ -388,7 +395,8 @@ export function ExternalRoomViewer() {
         <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
-            onClick={() => window.history.back()}
+            aria-label="Back to document details"
+            onClick={() => { const backTo = location.state?.backTo; if (typeof backTo === 'string' && backTo.startsWith('/external-room/documents/')) navigate(backTo); else window.history.back(); }}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-zinc-800 text-zinc-400 hover:text-zinc-100"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -398,7 +406,7 @@ export function ExternalRoomViewer() {
           </div>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-medium text-zinc-200">{session.document_name}</h1>
-            <p className="truncate text-xs text-zinc-500">Protected room viewer {session.session_id}</p>
+            <p className="truncate text-xs text-zinc-500">Protected document viewer</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -416,6 +424,7 @@ export function ExternalRoomViewer() {
           ) : null}
         </div>
       </header>
+      {preview.kind === 'pdf_pages' && <div className="flex flex-wrap items-center justify-center gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-200"><span>Page {activePage} of {preview.pageCount}</span><label>Zoom <select className="rounded border border-zinc-600 bg-zinc-800 p-1" aria-label="Zoom" value={zoom} onChange={e => setZoom(e.target.value)}><option value="fit-width">Fit width</option><option value="fit-page">Fit page</option>{[50, 75, 100, 125, 150, 200, 300, 400].map(value => <option key={value} value={String(value)}>{value}%</option>)}</select></label></div>}
       <main className="relative flex min-h-0 flex-1 overflow-hidden bg-zinc-950">
         <div className="relative z-10 flex h-full w-full min-h-0 flex-col bg-white">
           <div className="relative flex min-h-0 flex-1 bg-zinc-100">{renderPreview()}</div>

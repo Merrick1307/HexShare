@@ -144,7 +144,7 @@ class DocumentProcessor:
     _WATERMARK_MAX_LENGTH = 96
     _PDF_RENDER_WIDTH_DEFAULT = 1400
     _PDF_RENDER_WIDTH_MIN = 400
-    _PDF_RENDER_WIDTH_MAX = 2200
+    _PDF_RENDER_WIDTH_MAX = 4000
     _IMAGE_MIME_PREFIX = "image/"
     _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 

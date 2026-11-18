@@ -546,7 +546,7 @@ def build_router() -> APIRouter:
     async def stream_external_room_view_page_image(
         session_id: str,
         page_number: int,
-        width: int = Query(1400, ge=400, le=2200),
+        width: int = Query(1400, ge=400, le=4000),
         principal: ExternalRoomPrincipal = Depends(get_external_room_principal),
         external_room_viewer_service: ExternalRoomViewerService = Depends(get_external_room_viewer_service),
     ) -> StreamingResponse:

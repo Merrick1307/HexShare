@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -98,16 +98,29 @@ function DocumentRowMenu({
   const menuContentRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) {
       setPos(null);
       return;
     }
     const update = () => {
       const rect = buttonRef.current?.getBoundingClientRect();
-      if (rect) setPos({ top: rect.bottom + 8, left: rect.right - 192 }); // 192px = w-48
+      const menu = menuContentRef.current;
+      if (!rect || !menu) return;
+      const gap = 8;
+      const height = menu.getBoundingClientRect().height;
+      const width = menu.getBoundingClientRect().width;
+      const below = window.innerHeight - rect.bottom - gap;
+      const above = rect.top - gap;
+      const preferredTop = below >= height || below >= above ? rect.bottom + gap : rect.top - gap - height;
+      setPos({
+        top: Math.max(gap, Math.min(preferredTop, window.innerHeight - height - gap)),
+        left: Math.max(gap, Math.min(rect.right - width, window.innerWidth - width - gap)),
+      });
     };
     update();
+    const observer = new ResizeObserver(update);
+    if (menuContentRef.current) observer.observe(menuContentRef.current);
     function handleClick(e: MouseEvent) {
       const target = e.target as Node;
       if (buttonRef.current?.contains(target) || menuContentRef.current?.contains(target)) return;
@@ -117,6 +130,7 @@ function DocumentRowMenu({
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
     return () => {
+      observer.disconnect();
       document.removeEventListener('mousedown', handleClick);
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
@@ -128,11 +142,11 @@ function DocumentRowMenu({
       <Button ref={buttonRef} type="button" variant="outline" size="sm" className="h-9 w-9 p-0" onClick={onToggle}>
         <MoreHorizontal className="h-4 w-4" />
       </Button>
-      {isOpen && pos
+      {isOpen
         ? createPortal(
             <div
               ref={menuContentRef}
-              style={{ position: 'fixed', top: pos.top, left: pos.left }}
+              style={{ position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden', maxHeight: 'calc(100dvh - 16px)', overflowY: 'auto', maxWidth: 'calc(100vw - 16px)' }}
               className="z-50 w-48 rounded-xl border border-zinc-200 bg-white p-1 shadow-xl"
             >
               <Link to={`/documents/${doc.id}`} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50">
@@ -155,7 +169,7 @@ function DocumentRowMenu({
                 <FolderInput className="h-4 w-4" />
                 Move to room
               </button>
-              {storageAction}
+              <div className="document-menu-storage-action">{storageAction}</div>
               <div className="my-1 border-t border-zinc-100" />
               <button
                 type="button"
@@ -597,7 +611,7 @@ export function Dashboard({
                     ) : null}
                     <td className="relative overflow-visible px-6 py-4 text-right">
                       <DocumentRowMenu
-                        storageAction={renderStorageSave?.([doc.id], true)}
+                        storageAction={renderStorageSave?.([doc.id])}
                         doc={doc}
                         isOpen={openMenuId === doc.id}
                         onToggle={() => setOpenMenuId((current) => current === doc.id ? null : doc.id)}

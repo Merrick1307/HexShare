@@ -44,7 +44,7 @@ type DashboardProps = {
   enableDocumentControls?: boolean;
   documentsMetricLabel?: string;
   storageHistoryAction?: React.ReactNode;
-  renderStorageSave?: (ids: string[]) => React.ReactNode;
+  renderStorageSave?: (ids: string[], iconOnly?: boolean) => React.ReactNode;
 };
 
 function SortHeader({
@@ -597,7 +597,7 @@ export function Dashboard({
                     ) : null}
                     <td className="relative overflow-visible px-6 py-4 text-right">
                       <DocumentRowMenu
-                        storageAction={renderStorageSave?.([doc.id])}
+                        storageAction={renderStorageSave?.([doc.id], true)}
                         doc={doc}
                         isOpen={openMenuId === doc.id}
                         onToggle={() => setOpenMenuId((current) => current === doc.id ? null : doc.id)}

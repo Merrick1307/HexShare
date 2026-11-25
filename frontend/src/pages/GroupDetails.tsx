@@ -19,6 +19,7 @@ import {
   UserPlus,
   Plus,
   Pencil,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Users,
@@ -46,7 +47,8 @@ function statusForGrant(grant: ExternalRoomGrant) {
 
 type RoomAdminTab = 'home' | 'documents' | 'external-parties';
 
-export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderStorageSave }: { tabbedAdminView?: boolean; renderStorageSave?: (ids: string[]) => React.ReactNode; renderQuestions?: (scope: { documentId?: string; sectionId?: string }) => React.ReactNode } = {}) {
+export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderStorageSave }: { tabbedAdminView?: boolean; renderStorageSave?: (ids: string[], iconOnly?: boolean) => React.ReactNode; renderQuestions?: (scope: { documentId?: string; sectionId?: string }) => React.ReactNode } = {}) {
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [storageSelection, setStorageSelection] = useState<string[]>([]);
   const { id } = useParams<{ id: string }>();
   const [group, setGroup] = useState<DocumentGroup | null>(null);
@@ -565,6 +567,9 @@ export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderS
             .filter((document) => (document.room_section_id || null) === bucket.id)
             .sort((a, b) => a.room_position - b.room_position);
           if (!bucket.section && bucketDocuments.length === 0) return null;
+          const sectionKey = `${id}-${bucket.id || 'unsectioned'}`;
+          const collapsed = Boolean(collapsedSections[sectionKey]);
+          const contentId = `section-files-${sectionKey}`;
           return (
             <section key={bucket.id || 'unsectioned'} className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
@@ -574,9 +579,12 @@ export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderS
                   <p className="text-xs text-zinc-500">{bucketDocuments.length} document{bucketDocuments.length === 1 ? '' : 's'}</p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button type="button" variant="outline" size="sm" onClick={() => { setUploadSectionId(bucket.id || ''); setIsUploadModalOpen(true); }}>
-                    <Upload className="mr-2 h-4 w-4" /> Upload here
+                  <Button type="button" variant="outline" size="sm" title="Upload here" aria-label={`Upload to ${bucket.name}`} onClick={() => { setUploadSectionId(bucket.id || ''); setIsUploadModalOpen(true); }}>
+                    <Upload className="h-4 w-4" aria-hidden="true" />
                   </Button>
+                  <button type="button" title={collapsed ? 'Expand section' : 'Collapse section'} aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${bucket.name}`} aria-expanded={!collapsed} aria-controls={contentId} onClick={() => setCollapsedSections(current => ({ ...current, [sectionKey]: !current[sectionKey] }))} className="rounded p-2 text-zinc-500 hover:bg-white hover:text-indigo-600 focus-visible:outline-indigo-500">
+                    {collapsed ? <ChevronRight className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                  </button>
                   {bucket.section ? (
                     <>
                       <button type="button" title="Move section up" onClick={() => void moveSection(bucket.section!, -1)} className="rounded p-2 text-zinc-500 hover:bg-white"><ArrowUp className="h-4 w-4" /></button>
@@ -587,16 +595,17 @@ export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderS
                   ) : null}
                 </div>
               </div>
+              <div id={contentId} hidden={collapsed}>
               {bucketDocuments.length === 0 ? <p className="px-4 py-6 text-center text-sm text-zinc-400">No documents in this section.</p> : (
                 <ul className="divide-y divide-zinc-100">
                   {bucketDocuments.map((doc, index) => (
                     <li key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                       {renderStorageSave && <input type="checkbox" aria-label={`Select ${doc.name} for storage`} checked={storageSelection.includes(doc.id)} onChange={e => setStorageSelection(ids => e.target.checked ? [...ids, doc.id] : ids.filter(id => id !== doc.id))} />}
-                      {renderStorageSave?.([doc.id])}
+                      {renderStorageSave?.([doc.id], true)}
                       {renderQuestions?.({ documentId: doc.id })}
                       <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} size="sm" />
                       <div className="min-w-0 flex-1">
-                        <Link to={`/documents/${doc.id}`} className="truncate font-medium text-zinc-900 hover:text-indigo-600 hover:underline">{doc.name}</Link>
+                        <Link to={`/documents/${doc.id}`} className="block truncate text-sm font-medium text-zinc-900 hover:text-indigo-600 hover:underline">{doc.name}</Link>
                         <p className="text-xs text-zinc-500">{formatBytes(doc.size)} · {doc.protection?.label} · {format(parseApiDate(doc.created_at), 'MMM d, yyyy')}</p>
                       </div>
                       <select
@@ -615,6 +624,7 @@ export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderS
                   ))}
                 </ul>
               )}
+              </div>
             </section>
           );
         })}

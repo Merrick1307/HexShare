@@ -46,7 +46,8 @@ function statusForGrant(grant: ExternalRoomGrant) {
 
 type RoomAdminTab = 'home' | 'documents' | 'external-parties';
 
-export function GroupDetails({ tabbedAdminView = false, renderQuestions }: { tabbedAdminView?: boolean; renderQuestions?: (scope: { documentId?: string; sectionId?: string }) => React.ReactNode } = {}) {
+export function GroupDetails({ tabbedAdminView = false, renderQuestions, renderStorageSave }: { tabbedAdminView?: boolean; renderStorageSave?: (ids: string[]) => React.ReactNode; renderQuestions?: (scope: { documentId?: string; sectionId?: string }) => React.ReactNode } = {}) {
+  const [storageSelection, setStorageSelection] = useState<string[]>([]);
   const { id } = useParams<{ id: string }>();
   const [group, setGroup] = useState<DocumentGroup | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -551,6 +552,7 @@ export function GroupDetails({ tabbedAdminView = false, renderQuestions }: { tab
             </Button>
           </div>
         </div>
+        {renderStorageSave && <div className="flex items-center gap-3">{renderStorageSave(storageSelection)}<button onClick={() => setStorageSelection([])} disabled={!storageSelection.length}>Clear selection</button></div>}
         {documents.length === 0 && sections.length === 0 ? (
           <div className="rounded-xl border border-zinc-200 bg-white px-6 py-12 text-center text-zinc-500 shadow-sm">
             <FileText className="mx-auto mb-3 h-10 w-10 text-zinc-300" />
@@ -589,6 +591,8 @@ export function GroupDetails({ tabbedAdminView = false, renderQuestions }: { tab
                 <ul className="divide-y divide-zinc-100">
                   {bucketDocuments.map((doc, index) => (
                     <li key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      {renderStorageSave && <input type="checkbox" aria-label={`Select ${doc.name} for storage`} checked={storageSelection.includes(doc.id)} onChange={e => setStorageSelection(ids => e.target.checked ? [...ids, doc.id] : ids.filter(id => id !== doc.id))} />}
+                      {renderStorageSave?.([doc.id])}
                       {renderQuestions?.({ documentId: doc.id })}
                       <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} size="sm" />
                       <div className="min-w-0 flex-1">

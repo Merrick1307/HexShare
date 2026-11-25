@@ -43,6 +43,8 @@ type DashboardDocument = Document & {
 type DashboardProps = {
   enableDocumentControls?: boolean;
   documentsMetricLabel?: string;
+  storageHistoryAction?: React.ReactNode;
+  renderStorageSave?: (ids: string[]) => React.ReactNode;
 };
 
 function SortHeader({
@@ -82,8 +84,10 @@ function DocumentRowMenu({
   onCreateLink,
   onMoveToGroup,
   onDelete,
+  storageAction,
 }: {
   doc: Document;
+  storageAction?: React.ReactNode;
   isOpen: boolean;
   onToggle: () => void;
   onCreateLink: (document: Document) => void;
@@ -151,6 +155,7 @@ function DocumentRowMenu({
                 <FolderInput className="h-4 w-4" />
                 Move to room
               </button>
+              {storageAction}
               <div className="my-1 border-t border-zinc-100" />
               <button
                 type="button"
@@ -206,7 +211,10 @@ function compactShareUrl(value: string) {
 export function Dashboard({
   enableDocumentControls = false,
   documentsMetricLabel = 'Documents',
+  renderStorageSave,
+  storageHistoryAction,
 }: DashboardProps = {}) {
+  const [storageSelection, setStorageSelection] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -419,10 +427,10 @@ export function Dashboard({
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Documents</h1>
           <p className="mt-1 text-sm text-zinc-500">Manage documents, generate share links, and inspect analytics.</p>
         </div>
-        <Button onClick={() => setIsUploadModalOpen(true)} className="w-full gap-2 sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2">{storageHistoryAction}<Button onClick={() => setIsUploadModalOpen(true)} className="w-full gap-2 sm:w-auto">
           <Upload className="h-4 w-4" />
           Upload Document
-        </Button>
+        </Button></div>
       </div>
 
       {successMessage ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{successMessage}</div> : null}
@@ -488,6 +496,7 @@ export function Dashboard({
 
       <div ref={containerRef} className="max-h-[calc(100vh-16rem)] overflow-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
         <table className="w-full min-w-[760px] text-left text-sm">
+          <caption className="text-left">{renderStorageSave && <div className="flex items-center gap-3 p-3">{renderStorageSave(storageSelection)}<button onClick={() => setStorageSelection([])} disabled={!storageSelection.length}>Clear selection</button></div>}</caption>
           <thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
             <tr>
               <th className="px-6 py-3">
@@ -558,6 +567,7 @@ export function Dashboard({
                   <tr key={doc.id} className="group transition-colors hover:bg-zinc-50/50 dark:hover:bg-white/[0.04]">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
+                        {renderStorageSave && <input type="checkbox" aria-label={`Select ${doc.name} for storage`} checked={storageSelection.includes(doc.id)} onChange={e => setStorageSelection(ids => e.target.checked ? [...ids, doc.id] : ids.filter(id => id !== doc.id))} />}
                         <FileTypeIcon fileName={doc.name} mimeType={doc.mime_type} />
                         <div className="min-w-0">
                           <Link to={`/documents/${doc.id}`} className="font-medium text-zinc-900 hover:text-indigo-600 hover:underline">{doc.name}</Link>
@@ -587,6 +597,7 @@ export function Dashboard({
                     ) : null}
                     <td className="relative overflow-visible px-6 py-4 text-right">
                       <DocumentRowMenu
+                        storageAction={renderStorageSave?.([doc.id])}
                         doc={doc}
                         isOpen={openMenuId === doc.id}
                         onToggle={() => setOpenMenuId((current) => current === doc.id ? null : doc.id)}
